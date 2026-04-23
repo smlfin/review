@@ -5,81 +5,205 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:Arial,sans-serif;background:#f0f2f8;color:#222;min-height:100vh}
+    body{font-family:Arial,sans-serif;background:#e8ecf4;color:#1a1a2e;min-height:100vh}
 
-    .topbar{background:#fff;border-bottom:1px solid #e0e0e0;padding:12px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
-    .topbar h1{font-size:16px;font-weight:600;flex:1;min-width:150px;color:#2f3e75}
-    select,button{font-size:12px;padding:6px 10px;border:1px solid #ccc;border-radius:7px;background:#fff;color:#222;cursor:pointer}
-    button{background:#f5f5f5}
-    button:hover{background:#e8e8e8}
+    /* ── TOPBAR ── */
+    .topbar{background:#2f3e75;padding:12px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;box-shadow:0 2px 8px rgba(0,0,0,0.18)}
+    .topbar h1{font-size:16px;font-weight:700;flex:1;min-width:150px;color:#fff;letter-spacing:.02em}
+    select{font-size:12px;padding:6px 10px;border:1px solid #c7d0e8;border-radius:7px;background:#fff;color:#1a1a2e;cursor:pointer}
+    button{font-size:12px;padding:6px 14px;border:none;border-radius:7px;background:#fff;color:#2f3e75;cursor:pointer;font-weight:600}
+    button:hover{background:#dbeafe;color:#1d4ed8}
 
-    .main{padding:14px 18px;display:flex;flex-direction:column;gap:12px}
-    .card{background:#fff;border:1px solid #e4e4e4;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.05)}
-    .card-head{padding:11px 15px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px}
-    .card-head h2{font-size:13px;font-weight:600;color:#2f3e75}
+    /* ── LAYOUT ── */
+    .main{padding:16px 18px;display:flex;flex-direction:column;gap:14px}
 
-    .months-row{display:flex;flex-wrap:wrap;gap:5px;padding:10px 15px;border-bottom:1px solid #f0f0f0;align-items:center}
-    .chip{display:inline-block;padding:3px 10px;border-radius:7px;background:#f0f2f8;border:1px solid #ddd;font-size:11px;cursor:pointer;color:#555;transition:all .15s}
-    .chip.on{background:#dbeafe;color:#1d4ed8;border-color:#93c5fd;font-weight:600}
+    /* ── OUTER CARDS (snapshot, tab container, month picker) ── */
+    .card{
+      background:#fff;
+      border:2px solid #c7d0e8;
+      border-radius:14px;
+      overflow:hidden;
+      box-shadow:0 2px 10px rgba(47,62,117,0.08);
+    }
+    .card-head{
+      padding:11px 16px;
+      border-bottom:2px solid #c7d0e8;
+      display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;
+      background:linear-gradient(90deg,#2f3e75 0%,#3d52a0 100%);
+    }
+    .card-head h2{font-size:13px;font-weight:700;color:#fff;letter-spacing:.02em}
+    .card-head span{color:#c7d0e8!important}
 
-    .metrics-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:12px 15px}
-    .mc{background:#f8f9fc;border-radius:8px;padding:10px 13px;border:1px solid #eee}
-    .mc .ml{font-size:10px;color:#888;margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em}
-    .mc .mv{font-size:20px;font-weight:700}
-    .mc .ms{font-size:10px;color:#888;margin-top:2px}
+    /* ── MONTH CHIPS ── */
+    .months-row{display:flex;flex-wrap:wrap;gap:5px;padding:10px 15px;border-bottom:2px solid #c7d0e8;align-items:center;background:#f4f6fc}
+    .chip{display:inline-block;padding:3px 11px;border-radius:7px;background:#fff;border:1.5px solid #c7d0e8;font-size:11px;cursor:pointer;color:#555;font-weight:500;transition:all .15s}
+    .chip.on{background:#2f3e75;color:#fff;border-color:#2f3e75;font-weight:700}
+    .chip:hover:not(.on){background:#e8ecf4;border-color:#3d52a0}
 
+    /* ── KPI METRIC CARDS ── */
+    .metrics-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:14px 16px;background:#f4f6fc;border-bottom:2px solid #c7d0e8}
+    .mc{
+      background:#fff;
+      border-radius:10px;
+      padding:12px 14px;
+      border:1.5px solid #c7d0e8;
+      box-shadow:0 1px 4px rgba(47,62,117,0.07);
+    }
+    .mc .ml{font-size:10px;color:#6b7280;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+    .mc .mv{font-size:22px;font-weight:700;line-height:1.1}
+    .mc .ms{font-size:10px;color:#9ca3af;margin-top:3px}
+
+    /* ── TABLES (snapshot product table + trend table) ── */
     table{width:100%;border-collapse:collapse;font-size:12px}
-    th{background:#f8f9fc;padding:8px 12px;text-align:left;font-weight:600;font-size:11px;color:#555;border-bottom:1px solid #eee}
-    td{padding:8px 12px;border-bottom:1px solid #f5f5f5;vertical-align:middle}
+    thead{background:#2f3e75}
+    th{
+      background:#2f3e75;color:#fff;
+      padding:9px 12px;text-align:left;
+      font-weight:700;font-size:11px;
+      border-right:1px solid rgba(255,255,255,0.15);
+      letter-spacing:.03em;
+    }
+    th:last-child{border-right:none}
+    td{
+      padding:9px 12px;
+      border-bottom:1.5px solid #e2e8f4;
+      border-right:1px solid #edf0f7;
+      vertical-align:middle;
+      background:#fff;
+    }
+    td:last-child{border-right:none}
     tr:last-child td{border-bottom:none}
-    tr:hover td{background:#fafbff}
+    tr:nth-child(even) td{background:#f8faff}
+    tr:hover td{background:#eef2ff!important}
 
+    /* ── STAFF CARD TABLE — tighter padding ── */
+    .sc table td{padding:7px 8px}
+    .sc table th{padding:7px 8px}
+
+    /* ── PROGRESS BAR ── */
     .bar-wrap{display:flex;align-items:center;gap:7px}
-    .bar-bg{flex:1;height:6px;border-radius:3px;background:#eee;overflow:hidden;min-width:50px}
-    .bar-fill{height:100%;border-radius:3px;transition:width .4s}
+    .bar-bg{flex:1;height:7px;border-radius:4px;background:#e2e8f4;overflow:hidden;min-width:50px;border:1px solid #d1d9ef}
+    .bar-fill{height:100%;border-radius:4px;transition:width .4s}
 
-    .badge{font-size:10px;padding:2px 8px;border-radius:6px;font-weight:600;white-space:nowrap}
-    .bg{background:#fee2e2;color:#991b1b}
-    .ba{background:#fef3c7;color:#92400e}
-    .bn{background:#dcfce7;color:#166534}
-    .bb{background:#dbeafe;color:#1e40af}
+    /* ── BADGES ── */
+    .badge{font-size:10px;padding:3px 8px;border-radius:6px;font-weight:700;white-space:nowrap;letter-spacing:.02em}
+    .bg{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+    .ba{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}
+    .bn{background:#dcfce7;color:#166534;border:1px solid #86efac}
+    .bb{background:#dbeafe;color:#1e40af;border:1px solid #93c5fd}
 
-    .tab-row{display:flex;border-bottom:1px solid #eee;overflow-x:auto;background:#fafbff}
-    .tab{padding:10px 16px;font-size:12px;cursor:pointer;border-bottom:3px solid transparent;color:#888;white-space:nowrap;flex-shrink:0;font-weight:500}
-    .tab.on{border-bottom-color:#2f3e75;color:#2f3e75;font-weight:700}
+    /* ── TABS ── */
+    .tab-row{display:flex;border-bottom:2px solid #c7d0e8;overflow-x:auto;background:#f4f6fc}
+    .tab{padding:11px 18px;font-size:12px;cursor:pointer;border-bottom:3px solid transparent;color:#6b7280;white-space:nowrap;flex-shrink:0;font-weight:600;transition:all .15s}
+    .tab.on{border-bottom-color:#2f3e75;color:#2f3e75;background:#fff}
+    .tab:hover:not(.on){background:#eef2ff;color:#3d52a0}
     .tp{display:none}.tp.on{display:block}
 
-    .staff-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;padding:12px}
-    .sc{background:#fff;border:1px solid #e4e4e4;border-radius:11px;overflow:hidden}
-    .sc-head{padding:9px 13px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between;background:#f8f9fc}
-    .sc-name{font-size:13px;font-weight:600;color:#2f3e75}
+    /* ── STAFF PERFORMANCE GRID ── */
+    .staff-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;padding:14px}
+    .sc{
+      background:#fff;
+      border:2px solid #c7d0e8;
+      border-radius:12px;
+      overflow:hidden;
+      box-shadow:0 2px 8px rgba(47,62,117,0.08);
+      transition:box-shadow .2s;
+    }
+    .sc:hover{box-shadow:0 4px 16px rgba(47,62,117,0.15);border-color:#3d52a0}
+    .sc-head{
+      padding:10px 13px;
+      border-bottom:2px solid #c7d0e8;
+      display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px;
+      background:linear-gradient(90deg,#2f3e75 0%,#3d52a0 100%);
+    }
+    .sc-name{font-size:13px;font-weight:700;color:#fff}
 
-    .rank-row{display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid #f5f5f5;font-size:12px}
+    /* ── RANKINGS ── */
+    .rank-row{
+      display:flex;align-items:center;gap:10px;
+      padding:10px 16px;
+      border-bottom:1.5px solid #e2e8f4;
+      font-size:12px;
+      background:#fff;
+      transition:background .15s;
+    }
     .rank-row:last-child{border-bottom:none}
-    .rnum{width:22px;height:22px;border-radius:50%;background:#f0f2f8;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;border:1px solid #ddd}
+    .rank-row:hover{background:#f0f4ff}
+    .rank-row:nth-child(even){background:#f8faff}
+    .rank-row:nth-child(even):hover{background:#eef2ff}
+    .rnum{
+      width:24px;height:24px;border-radius:50%;
+      background:#e8ecf4;
+      display:flex;align-items:center;justify-content:center;
+      font-size:10px;font-weight:700;flex-shrink:0;
+      border:2px solid #c7d0e8;color:#2f3e75;
+    }
 
-    .sec-label{font-size:10px;font-weight:700;letter-spacing:.06em;color:#888;padding:10px 15px 3px;text-transform:uppercase;border-bottom:1px solid #f5f5f5;background:#fafbff}
+    /* ── SECTION LABELS (rankings / corrective dividers) ── */
+    .sec-label{
+      font-size:10px;font-weight:700;letter-spacing:.07em;
+      color:#fff;
+      padding:8px 16px;
+      text-transform:uppercase;
+      background:linear-gradient(90deg,#3d52a0 0%,#2f3e75 100%);
+      border-top:1px solid #c7d0e8;
+      border-bottom:1px solid #c7d0e8;
+    }
 
-    .ca-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:10px;padding:12px}
-    .ca-card{border-radius:11px;overflow:hidden;border:1px solid #e4e4e4}
-    .ca-head{padding:9px 13px;font-size:12px;font-weight:700;border-bottom:1px solid rgba(0,0,0,0.08);display:flex;align-items:center;justify-content:space-between}
-    .ca-body{padding:10px 13px;background:#fff;font-size:12px;color:#555}
-    .ca-stats{display:flex;gap:12px;margin-bottom:8px;font-size:11px;flex-wrap:wrap}
-    .step{display:flex;gap:7px;align-items:flex-start;margin-bottom:6px}
-    .step:last-child{margin-bottom:0}
-    .snum{width:18px;height:18px;border-radius:50%;background:#f0f2f8;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0;margin-top:1px;border:1px solid #ddd}
+    /* ── CORRECTIVE ACTION CARDS ── */
+    .ca-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:12px;padding:14px}
+    .ca-card{
+      border-radius:12px;overflow:hidden;
+      border:2px solid #e4e4e4;
+      box-shadow:0 2px 8px rgba(0,0,0,0.06);
+      transition:box-shadow .2s;
+    }
+    .ca-card:hover{box-shadow:0 4px 14px rgba(0,0,0,0.12)}
+    .ca-head{
+      padding:10px 14px;font-size:12px;font-weight:700;
+      border-bottom:2px solid rgba(0,0,0,0.1);
+      display:flex;align-items:center;justify-content:space-between;
+    }
+    .ca-body{padding:12px 14px;background:#fff;font-size:12px;color:#444}
+    .ca-stats{
+      display:flex;gap:12px;margin-bottom:10px;font-size:11px;flex-wrap:wrap;
+      padding-bottom:8px;border-bottom:1.5px solid #e8ecf4;
+    }
+    .step{display:flex;gap:8px;align-items:flex-start;margin-bottom:7px;padding-bottom:7px;border-bottom:1px dashed #e8ecf4}
+    .step:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
+    .snum{
+      width:20px;height:20px;border-radius:50%;
+      background:#2f3e75;color:#fff;
+      display:flex;align-items:center;justify-content:center;
+      font-size:9px;font-weight:700;flex-shrink:0;margin-top:1px;
+    }
 
-    .empty{padding:32px;text-align:center;color:#999;font-size:13px}
-    .spinner{padding:40px;text-align:center;color:#888;font-size:14px}
+    /* ── EMPTY / SPINNER ── */
+    .empty{padding:36px;text-align:center;color:#9ca3af;font-size:13px}
+    .spinner{padding:40px;text-align:center;color:#6b7280;font-size:14px}
 
-    .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:center;justify-content:center}
+    /* ── MODAL ── */
+    .overlay{display:none;position:fixed;inset:0;background:rgba(15,23,60,.5);z-index:200;align-items:center;justify-content:center}
     .overlay.open{display:flex}
-    .modal{background:#fff;border-radius:12px;width:420px;max-width:95vw;max-height:85vh;overflow-y:auto;border:1px solid #e4e4e4;box-shadow:0 8px 32px rgba(0,0,0,0.15)}
-    .modal-head{padding:13px 16px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between;background:#f8f9fc;border-radius:12px 12px 0 0}
-    .modal-head h3{font-size:13px;font-weight:700;color:#2f3e75}
-    .mclose{background:none;border:none;font-size:20px;color:#888;cursor:pointer;line-height:1;padding:0}
+    .modal{
+      background:#fff;border-radius:14px;
+      width:440px;max-width:95vw;max-height:85vh;overflow-y:auto;
+      border:2px solid #c7d0e8;
+      box-shadow:0 12px 40px rgba(47,62,117,0.22);
+    }
+    .modal-head{
+      padding:13px 16px;
+      border-bottom:2px solid #c7d0e8;
+      display:flex;align-items:center;justify-content:space-between;
+      background:linear-gradient(90deg,#2f3e75 0%,#3d52a0 100%);
+      border-radius:12px 12px 0 0;
+    }
+    .modal-head h3{font-size:13px;font-weight:700;color:#fff}
+    .mclose{background:none;border:none;font-size:20px;color:#c7d0e8;cursor:pointer;line-height:1;padding:0}
+    .mclose:hover{color:#fff}
     .modal-body{padding:14px 16px}
 
+    /* ── TREND TABLE alternating ── */
     .trend-up{color:#166534;font-weight:700}
     .trend-dn{color:#991b1b;font-weight:700}
 
@@ -393,7 +517,7 @@ function renderSnap(staff, months) {
     <div class="card">
       <div class="card-head">
         <h2>🏢 Branch Snapshot — ${branch.branchName}</h2>
-        <span style="font-size:11px;color:#888">${mlist}</span>
+        <span style="font-size:11px;color:#c7d0e8">${mlist}</span>
       </div>
       <div class="metrics-row">
         <div class="mv" style="color:${onTgt===staffCount?"#166534":"#991b1b"}">${onTgt} / ${staffCount}</div>
@@ -417,37 +541,57 @@ function renderStaff(staff, months) {
     let sa = 0, st = 0, rows = "";
     for (let k in s.metrics) {
       const r = calc(s.metrics[k], months);
+      const metric = s.metrics[k];
 
       if (k === "BusinessLoan") {
-        // No individual target for BL — show achievement only
-        // Sum BL ach into overall % using branch target proportionally (count ach, skip tgt)
         sa += r.ach;
-        // Don't add to st — we exclude BL from individual overall %
         rows += `<tr>
           <td style="color:#555">${PLABEL[k]||k}</td>
           <td style="color:#888;font-style:italic;font-size:11px">Branch target</td>
           <td style="cursor:pointer;color:#1d4ed8;text-decoration:underline"
-              onclick='openBreak(${JSON.stringify(s.name)},${JSON.stringify(k)},${JSON.stringify(s.metrics[k])})'>${fmt(r.ach)}</td>
+              onclick='openBreak(${JSON.stringify(s.name)},${JSON.stringify(k)},${JSON.stringify(metric)})'>${fmt(r.ach)}</td>
           <td>—</td>
           <td>—</td>
         </tr>`;
       } else {
         sa += r.ach; st += r.tgt;
         const gap = r.gap;
+        // Main product row
         rows += `<tr>
           <td style="color:#555">${PLABEL[k]||k}</td>
           <td>${fmt(r.tgt)}</td>
           <td style="cursor:pointer;color:#1d4ed8;text-decoration:underline"
-              onclick='openBreak(${JSON.stringify(s.name)},${JSON.stringify(k)},${JSON.stringify(s.metrics[k])})'>${fmt(r.ach)}</td>
+              onclick='openBreak(${JSON.stringify(s.name)},${JSON.stringify(k)},${JSON.stringify(metric)})'>${fmt(r.ach)}</td>
           <td><span class="badge ${bc(r.pct)}">${r.pct}%</span></td>
           <td style="color:${gap<0?"#991b1b":"#166534"};font-weight:700">${gap>=0?"+":""}${fmt(gap)}</td>
         </tr>`;
+        // Outstanding sub-row — only for Investment and GoldLoan
+        if ((k === "Investment" || k === "GoldLoan") && metric.outstanding !== null && metric.outstanding !== undefined) {
+          rows += `<tr style="background:#fffbeb">
+            <td style="color:#92400e;font-size:11px;padding-left:20px">↳ Outstanding</td>
+            <td colspan="4" style="color:#92400e;font-weight:600;font-size:11px">${fmt(metric.outstanding)}</td>
+          </tr>`;
+        }
       }
     }
     const op = st > 0 ? Math.round(sa / st * 100) : 0;
+    // DOJ badge with years of service
+    let dojBadge = "";
+    if (s.doj) {
+      const parts = s.doj.split("-"); // dd-MMM-yyyy
+      const dojDate = new Date(`${parts[1]} ${parts[0]} ${parts[2]}`);
+      const diffMs = Date.now() - dojDate.getTime();
+      const yrs = (diffMs / (1000 * 60 * 60 * 24 * 365.25));
+      const display = yrs < 1
+        ? `${Math.round(yrs * 12)}m`
+        : `${yrs.toFixed(1)}y`;
+      dojBadge = `<span style="font-size:10px;color:#c7d0e8;font-weight:400;margin-left:6px">DOJ: ${s.doj} <span style="color:#93c5fd;font-weight:700">(${display})</span></span>`;
+    }
     html += `<div class="sc">
       <div class="sc-head">
-        <span class="sc-name">👤 ${s.name}</span>
+        <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap">
+          <span class="sc-name">👤 ${s.name}</span>${dojBadge}
+        </div>
         <span class="badge ${bc(op)}">${op}% — ${mLabel}</span>
       </div>
       <table>
@@ -622,22 +766,26 @@ function renderCorrective(staff, months) {
 /* ── MONTH TREND TAB ── */
 function renderTrend(staff, months) {
   if (!staff.length) { document.getElementById("tp-trend").innerHTML = `<div class="empty">No data.</div>`; return; }
-  const products = Object.keys(staff[0]?.metrics || {});
   let html = "";
 
-  products.forEach(p => {
-    html += `<div class="sec-label">📈 ${PLABEL[p]||p} — Month-on-Month Achievement</div>`;
-    html += `<div style="overflow-x:auto"><table><thead><tr><th>Staff</th>`;
-    MONTHS.forEach(m => html += `<th style="${selMonths.has(m) ? "color:#2f3e75;font-weight:700" : "color:#bbb"}">${m}</th>`);
-    html += `<th>Total</th></tr></thead><tbody>`;
+  staff.forEach(s => {
+    const products = Object.keys(s.metrics || {});
+    if (!products.length) return;
 
-    staff.forEach(s => {
+    html += `<div class="sec-label">👤 ${s.name}</div>`;
+    html += `<div style="overflow-x:auto"><table><thead><tr>
+      <th>Product</th>`;
+    MONTHS.forEach(m => html += `<th style="${selMonths.has(m) ? "border-bottom:3px solid #93c5fd" : "opacity:0.45"}">${m}</th>`);
+    html += `<th>Selected Total</th></tr></thead><tbody>`;
+
+    products.forEach(p => {
       if (!s.metrics[p]) return;
       const ma = s.metrics[p].monthlyAchievement;
       const mt = s.metrics[p].monthlyTarget || 0;
       let total = 0;
       let cells = "";
       let prev = null;
+
       MONTHS.forEach(m => {
         const v = ma[m] || 0;
         if (selMonths.has(m)) total += v;
@@ -649,13 +797,24 @@ function renderTrend(staff, months) {
             ? `<span class="trend-dn"> ↓</span>`
             : `<span style="color:#bbb"> —</span>`;
         }
-        const dim  = !selMonths.has(m) ? "opacity:0.3;" : "";
-        const hi   = mt > 0 && v >= mt ? "background:#f0fdf4;" : "";
+        const dim = !selMonths.has(m) ? "opacity:0.3;" : "";
+        const hi  = mt > 0 && v >= mt ? "background:#f0fdf4;" : "";
         cells += `<td style="${dim}${hi}">${v}${arrow}</td>`;
         prev = v;
       });
-      html += `<tr><td style="font-weight:600">${s.name}</td>${cells}<td style="font-weight:700">${fmt(total)}</td></tr>`;
+
+      // For BL — label as branch target, no green highlight logic
+      const productLabel = p === "BusinessLoan"
+        ? `<span style="color:#555">${PLABEL[p]}</span> <span style="font-size:10px;color:#9ca3af;font-style:italic">branch</span>`
+        : PLABEL[p] || p;
+
+      html += `<tr>
+        <td style="font-weight:600;white-space:nowrap">${productLabel}</td>
+        ${cells}
+        <td style="font-weight:700;color:#2f3e75">${fmt(total)}</td>
+      </tr>`;
     });
+
     html += `</tbody></table></div>`;
   });
 
@@ -689,6 +848,14 @@ function openBreak(sname, pkey, metric) {
     </tr>`;
   }).join("");
 
+  // Outstanding block — only for Investment and GoldLoan
+  const outstandingHTML = (pkey === "Investment" || pkey === "GoldLoan") && metric.outstanding !== null && metric.outstanding !== undefined
+    ? `<div style="margin-top:10px;padding:8px 10px;background:#fffbeb;border-radius:7px;border:1px solid #fcd34d;font-size:12px">
+        <span style="color:#92400e;font-weight:600">Outstanding portfolio: </span>
+        <span style="color:#92400e;font-weight:700">${fmt(metric.outstanding)}</span>
+       </div>`
+    : "";
+
   document.getElementById("modalBody").innerHTML = `
     <div style="margin-bottom:10px;font-size:12px;color:#888">Monthly target: <b style="color:#222">${fmt(mt)}</b></div>
     <table style="font-size:12px">
@@ -699,7 +866,8 @@ function openBreak(sname, pkey, metric) {
       <span>Selected total: <b>${fmt(r.ach)}</b></span>
       <span>Target: <b>${fmt(r.tgt)}</b></span>
       <span style="color:${pc(r.pct)};font-weight:700">${r.pct}%</span>
-    </div>`;
+    </div>
+    ${outstandingHTML}`;
   document.getElementById("overlay").classList.add("open");
 }
 
