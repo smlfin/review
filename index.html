@@ -214,12 +214,29 @@
       .staff-grid{grid-template-columns:1fr}
       .ca-grid{grid-template-columns:1fr}
     }
+.topbar a.nav-link {
+  font-size: 12px;
+  text-decoration: none;
+  padding: 6px 14px;
+  border-radius: 7px;
+  background: #fff;
+  color: #2f3e75;
+  font-weight: 600;
+  transition: all 0.2s;
+  margin-right: 10px; /* Space before dropdowns */
+}
+.topbar a.nav-link:hover {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
   </style>
 </head>
 <body>
 
 <div class="topbar">
   <h1>📊 Branch Review Dashboard</h1>
+<!-- New clickable link -->
+  <a href="staff_dashboard.html" class="nav-link">Staff Productivity</a>
   <select id="branchSel" onchange="onBranch()"></select>
   <select id="modeSel" onchange="onMode()">
     <option value="all">All staff</option>
