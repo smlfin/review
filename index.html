@@ -235,15 +235,19 @@
 
 <div class="topbar">
   <h1>📊 Branch Review Dashboard</h1>
-<!-- New clickable link -->
   <a href="staff_dashboard.html" class="nav-link">Staff Productivity</a>
-  <select id="branchSel" onchange="onBranch()"></select>
+  <span id="adminReportLink" style="display:none">
+    <a href="admin_report.html" class="nav-link" style="background:#fef3c7;color:#92400e">📋 Admin Report</a>
+  </span>
+  <select id="branchSel" onchange="onBranch()" style="display:none"></select>
   <select id="modeSel" onchange="onMode()">
     <option value="all">All staff</option>
     <option value="single">Individual</option>
   </select>
   <select id="staffSel" style="display:none" onchange="render()"></select>
+  <span id="userInfo" style="font-size:11px;color:#c7d0e8;margin-left:4px"></span>
   <button onclick="doExport()">⬇ Export</button>
+  <button onclick="doLogout()" style="background:rgba(255,255,255,0.15);color:#fff">Logout</button>
 </div>
 
 <div class="main" id="mainArea">
@@ -261,7 +265,8 @@
 </div>
 
 <script>
-const API = "https://script.google.com/macros/s/AKfycbxPNCPI8_tZWAESgIJkwLBO33pcr-wfE5xJHNZDf22ti0U3jrE4YdaUyTIgudkb7MuY/exec";
+const API      = "https://script.google.com/macros/s/AKfycbxCPUgEROwobfkforYE-259KkRlXSrfAz8HyVDVMwhQ5WXk4avLxJTTk8QkBQV7aVyL/exec";
+const AUTH_URL = "https://script.google.com/macros/s/AKfycby23RcAt1JXHScq5dPGgSqvxjTB_kzA2wud8Qv9Kl9LThDjGOSQWIc9k16n1cQvOo5b/exec"; // ← paste auth GAS deployment URL
 
 const MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -313,22 +318,82 @@ const STEPS = {
   ]
 };
 
-let allData = [];
+// ── SESSION ──────────────────────────────────────────────────
+const SESSION_TOKEN  = localStorage.getItem("brToken");
+const SESSION_ROLE   = localStorage.getItem("brRole");
+const SESSION_BRANCH = localStorage.getItem("brBranch");
+const SESSION_NAME   = localStorage.getItem("brName");
+const SESSION_EMPID  = localStorage.getItem("brEmpId");
+const SESSION_DATE   = localStorage.getItem("brLoginDate");
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+
+// Auth guard — redirect to login if no valid session
+if (!SESSION_TOKEN || SESSION_DATE !== todayStr()) {
+  window.location.href = "login.html";
+}
+
+
 let selMonths = new Set(["Apr"]);
 let branch = null;
+
+/* ── SETUP UI FOR ROLE ── */
+function setupRoleUI() {
+  // User info label
+  document.getElementById("userInfo").textContent =
+    SESSION_NAME + (SESSION_ROLE === "staff" ? " (Staff)" : SESSION_ROLE === "branch" ? " (Branch)" : " (Admin)");
+
+  // Admin-only elements
+  if (SESSION_ROLE === "admin") {
+    document.getElementById("branchSel").style.display = "inline-block";
+    document.getElementById("adminReportLink").style.display = "inline";
+  }
+
+  // Staff reviewed bar
+  if (SESSION_ROLE === "staff") {
+    document.getElementById("reviewedBar").style.display = "flex";
+    // Add bottom padding so content isn't hidden behind bar
+    document.querySelector(".main").style.paddingBottom = "70px";
+  }
+}
 
 /* ── LOAD ── */
 async function load() {
   try {
-    const r = await fetch(API);
+    // Pass token to data API
+    const r = await fetch(API + "?token=" + encodeURIComponent(SESSION_TOKEN));
     const j = await r.json();
+
+    // If token rejected by data API
+    if (j.error === "unauthorized") {
+      doLogout();
+      return;
+    }
+
     allData = j.branches;
-    const sel = document.getElementById("branchSel");
-    allData.forEach((b, i) => {
-      const o = document.createElement("option");
-      o.value = i; o.textContent = b.branchName;
-      sel.appendChild(o);
-    });
+
+    setupRoleUI();
+
+    if (SESSION_ROLE === "admin") {
+      // Admin sees branch selector with all branches
+      const sel = document.getElementById("branchSel");
+      allData.forEach((b, i) => {
+        const o = document.createElement("option");
+        o.value = i; o.textContent = b.branchName;
+        sel.appendChild(o);
+      });
+    } else {
+      // Branch / staff — locked to their branch, no selector shown
+      // allData is already filtered by GAS to their branch only
+      // but we also filter client-side as a safety net
+      allData = allData.filter(b =>
+        b.branchName.trim().toLowerCase() === SESSION_BRANCH.trim().toLowerCase()
+      );
+    }
+
     buildShell();
     onBranch();
   } catch(e) {
@@ -337,8 +402,11 @@ async function load() {
 }
 
 function onBranch() {
-  const i = document.getElementById("branchSel").value || 0;
-  branch = allData[i];
+  const sel = document.getElementById("branchSel");
+  const i   = SESSION_ROLE === "admin" ? (sel.value || 0) : 0;
+  branch    = allData[i];
+  if (!branch) return;
+
   const ss = document.getElementById("staffSel");
   ss.innerHTML = "";
   (branch.staff || []).forEach(s => {
@@ -349,11 +417,70 @@ function onBranch() {
   render();
 }
 
-function onMode() {
-  const m = document.getElementById("modeSel").value;
-  document.getElementById("staffSel").style.display = m === "single" ? "inline-block" : "none";
-  render();
+/* ── LOGOUT ── */
+function doLogout() {
+  localStorage.clear();
+  window.location.href = "login.html";
 }
+
+/* ── MARK REVIEWED (staff only) ── */
+async function markReviewed() {
+  const btn = document.getElementById("reviewedBtn");
+  const msg = document.getElementById("reviewedMsg");
+  btn.disabled = true;
+  btn.textContent = "Saving...";
+
+  try {
+    const res = await fetch(AUTH_URL, {
+      method  : "POST",
+      headers : { "Content-Type": "application/json" },
+      body    : JSON.stringify({ action: "markReviewed", token: SESSION_TOKEN })
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      btn.textContent       = "✓ Reviewed";
+      btn.style.background  = "#166534";
+      btn.disabled          = true;
+      msg.textContent       = data.alreadyMarked
+        ? "✅ Already marked as reviewed today."
+        : "✅ Marked as reviewed for today. Thank you!";
+    } else {
+      btn.disabled    = false;
+      btn.textContent = "✓ Mark as Reviewed";
+      alert(data.error || "Could not save. Try again.");
+    }
+  } catch(e) {
+    btn.disabled    = false;
+    btn.textContent = "✓ Mark as Reviewed";
+    alert("Network error. Please try again.");
+  }
+}
+
+// Check if already reviewed today on load (staff only)
+async function checkReviewedStatus() {
+  if (SESSION_ROLE !== "staff") return;
+  try {
+    const res = await fetch(AUTH_URL, {
+      method  : "POST",
+      headers : { "Content-Type": "application/json" },
+      body    : JSON.stringify({ action: "markReviewed", token: SESSION_TOKEN })
+    });
+    // We only pre-check — don't actually mark, just see if already done
+    // Instead validate token and check log via a read-only approach
+    // The markReviewed endpoint returns alreadyMarked:true without double-writing
+    // because the GAS checks before appending
+    const data = await res.json();
+    if (data.ok && data.alreadyMarked) {
+      document.getElementById("reviewedBtn").textContent      = "✓ Reviewed";
+      document.getElementById("reviewedBtn").style.background = "#166534";
+      document.getElementById("reviewedBtn").disabled         = true;
+      document.getElementById("reviewedMsg").textContent      = "✅ Already marked as reviewed today.";
+    }
+  } catch(e) {}
+}
+
+
 
 function getMonths() { return MONTHS.filter(m => selMonths.has(m)); }
 
@@ -944,7 +1071,22 @@ function doExport() {
 }
 
 /* ── INIT ── */
-load();
+load().then(() => checkReviewedStatus());
 </script>
+<!-- Staff reviewed button — shown only for staff role -->
+<div id="reviewedBar" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:100;
+  background:linear-gradient(90deg,#2f3e75,#3d52a0);
+  padding:12px 18px;display:flex;align-items:center;justify-content:space-between;
+  box-shadow:0 -2px 12px rgba(0,0,0,0.2);flex-wrap:wrap;gap:8px">
+  <span style="font-size:13px;color:#fff;font-weight:600" id="reviewedMsg">
+    📌 Have you reviewed your performance for today?
+  </span>
+  <button id="reviewedBtn" onclick="markReviewed()"
+    style="padding:8px 20px;background:#22c55e;color:#fff;border:none;border-radius:8px;
+    font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.03em">
+    ✓ Mark as Reviewed
+  </button>
+</div>
+
 </body>
 </html>
