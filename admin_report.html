@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin Report — Branch Review</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,sans-serif;background:#e8ecf4;color:#1a1a2e;min-height:100vh}
+
+    .topbar{background:#2f3e75;padding:12px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 2px 8px rgba(0,0,0,0.18)}
+    .topbar h1{font-size:15px;font-weight:700;color:#fff;flex:1}
+    .nav-link{font-size:12px;text-decoration:none;padding:6px 14px;border-radius:7px;background:#fff;color:#2f3e75;font-weight:700}
+    .nav-link:hover{background:#dbeafe}
+    .logout{font-size:12px;padding:6px 14px;border-radius:7px;background:rgba(255,255,255,0.15);color:#fff;border:none;cursor:pointer;font-weight:600}
+    .logout:hover{background:rgba(255,255,255,0.25)}
+
+    .main{padding:16px 18px;display:flex;flex-direction:column;gap:14px}
+
+    .date-bar{
+      background:linear-gradient(90deg,#2f3e75,#3d52a0);
+      border-radius:12px;padding:14px 18px;
+      display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;
+      color:#fff;
+    }
+    .date-bar h2{font-size:14px;font-weight:700}
+    .date-bar span{font-size:12px;color:#c7d0e8}
+    .refresh-btn{font-size:11px;padding:5px 12px;border-radius:6px;background:rgba(255,255,255,0.2);color:#fff;border:none;cursor:pointer;font-weight:600}
+    .refresh-btn:hover{background:rgba(255,255,255,0.3)}
+
+    .summary-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+    .sc{background:#fff;border:2px solid #c7d0e8;border-radius:12px;padding:14px;box-shadow:0 2px 8px rgba(47,62,117,0.07)}
+    .sc .sl{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+    .sc .sv{font-size:24px;font-weight:700}
+    .sc .ss{font-size:11px;color:#9ca3af;margin-top:2px}
+
+    .branch-card{background:#fff;border:2px solid #c7d0e8;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(47,62,117,0.07)}
+    .bc-head{
+      padding:11px 16px;
+      background:linear-gradient(90deg,#2f3e75,#3d52a0);
+      display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;
+    }
+    .bc-head h3{font-size:13px;font-weight:700;color:#fff}
+    .bc-head .meta{font-size:11px;color:#c7d0e8}
+
+    .bc-stats{display:flex;gap:0;border-bottom:2px solid #e2e8f4;background:#f4f6fc}
+    .bc-stat{flex:1;padding:10px 14px;border-right:1.5px solid #e2e8f4;text-align:center}
+    .bc-stat:last-child{border-right:none}
+    .bc-stat .bsl{font-size:10px;color:#6b7280;text-transform:uppercase;font-weight:600;letter-spacing:.04em}
+    .bc-stat .bsv{font-size:18px;font-weight:700;margin-top:2px}
+
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    thead{background:#2f3e75}
+    th{background:#2f3e75;color:#fff;padding:8px 12px;text-align:left;font-weight:700;font-size:11px;border-right:1px solid rgba(255,255,255,0.15);letter-spacing:.03em}
+    th:last-child{border-right:none}
+    td{padding:8px 12px;border-bottom:1.5px solid #e2e8f4;border-right:1px solid #edf0f7;vertical-align:middle;background:#fff}
+    td:last-child{border-right:none}
+    tr:last-child td{border-bottom:none}
+    tr:nth-child(even) td{background:#f8faff}
+    tr:hover td{background:#eef2ff!important}
+
+    .badge{font-size:10px;padding:3px 8px;border-radius:6px;font-weight:700;white-space:nowrap}
+    .bg{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+    .bn{background:#dcfce7;color:#166534;border:1px solid #86efac}
+    .ba{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}
+
+    .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+    .dot-green{background:#22c55e}
+    .dot-red{background:#ef4444}
+    .dot-amber{background:#f59e0b}
+
+    .spinner{padding:60px;text-align:center;color:#6b7280;font-size:14px}
+    .empty{padding:30px;text-align:center;color:#9ca3af;font-size:13px}
+
+    .manager-row{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:2px solid #e2e8f4;background:#fafbff;font-size:12px}
+    .manager-row span{color:#6b7280}
+    .manager-row strong{color:#1a1a2e}
+
+    @media(max-width:600px){
+      .main{padding:10px 12px}
+      .summary-row{grid-template-columns:1fr 1fr}
+      .bc-stats{flex-wrap:wrap}
+    }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>📋 Admin Report — Daily View Tracker</h1>
+  <a href="index.html" class="nav-link">← Dashboard</a>
+  <button class="logout" onclick="logout()">Logout</button>
+</div>
+
+<div class="main" id="mainArea">
+  <div class="spinner">⏳ Loading report...</div>
+</div>
+
+<script>
+const LOGIN_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRR56uoynbmoUzY-qv39Bo0HUWRBV4fB2EI38BcSfpW0zxuwzGad5LGWXn3gVmU52d09uJJifMEeOeH/pub?gid=61545749&single=true&output=csv";
+const LOG_CSV   = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRR56uoynbmoUzY-qv39Bo0HUWRBV4fB2EI38BcSfpW0zxuwzGad5LGWXn3gVmU52d09uJJifMEeOeH/pub?gid=325077854&single=true&output=csv";
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+
+function todayDisplay() {
+  return new Date().toLocaleDateString("en-IN", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+}
+
+// Helper to turn CSV text into an Array
+function parseCSV(text) {
+  return text.split("\n").map(row => row.split(",").map(cell => cell.replace(/"/g, "").trim()));
+}
+
+async function loadReport() {
+  const main = document.getElementById("mainArea");
+  main.innerHTML = `<div class="spinner">⏳ Fetching CSV Data...</div>`;
+
+  try {
+    // 1. Fetch both sheets simultaneously
+    const [loginRes, logRes] = await Promise.all([fetch(LOGIN_CSV), fetch(LOG_CSV)]);
+    const loginText = await loginRes.text();
+    const logText = await logRes.text();
+
+    const loginRows = parseCSV(loginText);
+    const logRows   = parseCSV(logText);
+
+    const todayDate = todayStr();
+    const viewedIds = new Set();
+    const reviewedIds = new Set();
+
+    // 2. Process ViewLog (Col 0: Date, Col 4: Type, Col 5: EmpID)
+    logRows.forEach((row, i) => {
+      if (i === 0 || !row[0]) return; // Skip header/empty
+      const rowDate = row[0].substring(0, 10); // Extract YYYY-MM-DD
+      if (rowDate === todayDate) {
+        const empId = row[5];
+        const type = row[4];
+        if (empId) {
+          viewedIds.add(empId);
+          if (type === "reviewed") reviewedIds.add(empId);
+        }
+      }
+    });
+
+    // 3. Process Login Roster (Col 0: EmpID, Col 1: Name, Col 2: Branch)
+    const roster = [];
+    const branchMap = {};
+
+    loginRows.forEach((row, i) => {
+      if (i === 0 || !row[0]) return;
+      const empId = row[0];
+      const name  = row[1];
+      const branch = row[2];
+
+      const staffObj = {
+        empId,
+        fullName: name,
+        loggedIn: viewedIds.has(empId),
+        reviewed: reviewedIds.has(empId)
+      };
+
+      if (!branchMap[branch]) branchMap[branch] = { branch, totalStaff: 0, staffLoggedIn: 0, staffReviewed: 0, staffReport: [] };
+      
+      branchMap[branch].staffReport.push(staffObj);
+      branchMap[branch].totalStaff++;
+      if (staffObj.loggedIn) branchMap[branch].staffLoggedIn++;
+      if (staffObj.reviewed) branchMap[branch].staffReviewed++;
+    });
+
+    // 4. Render
+    renderReport({ ok: true, branchReport: Object.values(branchMap) });
+
+  } catch (e) {
+    main.innerHTML = `<div class="empty">❌ Error loading CSV: ${e.message}</div>`;
+  }
+}
+
+// Use your existing renderReport function exactly as it was
+// ── GLOBALS TO STORE DATA FOR DOWNLOAD ──────────────────────
+let currentMissingStaff = [];
+
+function renderReport(data) {
+  const report = data.branchReport || [];
+  const totalStaff    = report.reduce((s, b) => s + b.totalStaff, 0);
+  const totalLoggedIn = report.reduce((s, b) => s + b.staffLoggedIn, 0);
+  const totalReviewed = report.reduce((s, b) => s + b.staffReviewed, 0);
+  const totalMissing  = totalStaff - totalLoggedIn;
+
+  // Store missing staff globally for the drill-down/download
+  currentMissingStaff = [];
+  report.forEach(b => {
+    b.staffReport.forEach(s => {
+      if (!s.loggedIn) {
+        currentMissingStaff.push({ Branch: b.branch, Name: s.fullName, EmpID: s.empId });
+      }
+    });
+  });
+
+  let html = `
+    <div class="date-bar">
+      <div><h2>📅 ${todayDisplay()}</h2><span>Direct CSV Sync</span></div>
+      <button class="refresh-btn" onclick="loadReport()">↻ Sync Now</button>
+    </div>
+
+    <div class="summary-row">
+      <div class="sc"><div class="sl">Total Staff</div><div class="sv">${totalStaff}</div></div>
+      <div class="sc"><div class="sl">Viewed</div><div class="sv" style="color:#166534">${totalLoggedIn}</div></div>
+      
+      <div class="sc" onclick="showMissingDrillDown()" style="cursor:pointer; border-color:#991b1b; background:#fff5f5">
+        <div class="sl" style="color:#991b1b">Missing (Click to View)</div>
+        <div class="sv" style="color:#991b1b">${totalMissing}</div>
+        <div class="ss">Click to download list</div>
+      </div>
+
+      <div class="sc"><div class="sl">Reviewed</div><div class="sv" style="color:#2f3e75">${totalReviewed}</div></div>
+    </div>
+    
+    <div id="drillDownArea"></div>`;
+
+  // Build Branch Cards
+  report.forEach(b => {
+    let staffRows = "";
+    b.staffReport.forEach((s, i) => {
+      const loginBadge = s.loggedIn ? `<span class="badge bn">Viewed</span>` : `<span class="badge bg">MISSING</span>`;
+      const reviewBadge = s.reviewed ? `<span class="badge bn">✓ Done</span>` : `<span class="badge ba">Pending</span>`;
+      staffRows += `<tr><td>${i+1}</td><td>${s.fullName}</td><td>${s.empId}</td><td>${loginBadge}</td><td>${reviewBadge}</td></tr>`;
+    });
+
+    html += `
+      <div class="branch-card">
+        <div class="bc-head"><h3>🏢 ${b.branch}</h3></div>
+        <table>
+          <thead><tr><th>#</th><th>Name</th><th>ID</th><th>Status</th><th>Review</th></tr></thead>
+          <tbody>${staffRows}</tbody>
+        </table>
+      </div>`;
+  });
+
+  document.getElementById("mainArea").innerHTML = html;
+}
+
+// ── DRILL DOWN & DOWNLOAD ───────────────────────────────────
+function showMissingDrillDown() {
+  if (currentMissingStaff.length === 0) {
+    alert("No staff are missing today!");
+    return;
+  }
+
+  let tableHtml = `
+    <div class="branch-card" style="border: 2px solid #991b1b; margin-top:10px;">
+      <div class="bc-head" style="background:#991b1b">
+        <h3>🚨 Missing Staff Detail</h3>
+        <button class="refresh-btn" onclick="downloadMissingCSV()">📥 Download CSV</button>
+      </div>
+      <table id="missingTable">
+        <thead><tr><th>Branch</th><th>Name</th><th>Employee ID</th></tr></thead>
+        <tbody>
+          ${currentMissingStaff.map(s => `<tr><td>${s.Branch}</td><td>${s.Name}</td><td>${s.EmpID}</td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  
+  document.getElementById("drillDownArea").innerHTML = tableHtml;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function downloadMissingCSV() {
+  let csvContent = "data:text/csv;charset=utf-8,Branch,Name,EmpID\n";
+  currentMissingStaff.forEach(s => {
+    csvContent += `"${s.Branch}","${s.Name}","${s.EmpID}"\n`;
+  });
+
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement("a");
+  link.setAttribute("href", encodedUri);
+  link.setAttribute("download", `Missing_Staff_${todayStr()}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function logout() { localStorage.clear(); window.location.href = "login.html"; }
+loadReport();
+</script>
+</body>
+</html>
