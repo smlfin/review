@@ -177,6 +177,11 @@ input[type=range]{accent-color:var(--accent);width:110px;cursor:pointer}
 @keyframes shim{0%{background-position:200% 0}100%{background-position:-200% 0}}
 
 .empty{color:var(--text3);font-size:12px;padding:16px 0}
+
+/* ── PEER SWITCH ── */
+.peer-switch{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:3px;gap:2px;margin-bottom:14px}
+.ps-btn{padding:5px 14px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:transparent;color:var(--text2);font-family:'Inter',sans-serif;transition:background .15s,color .15s}
+.ps-btn.on{background:var(--surface);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.08)}
 .badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600}
 .badge-green{background:var(--green-bg);color:var(--green)}
 .badge-red{background:var(--red-bg);color:var(--red)}
@@ -315,11 +320,16 @@ input[type=range]{accent-color:var(--accent);width:110px;cursor:pointer}
 
   <!-- Full peer table -->
   <div class="peer-section">
-    <div class="panel-title" style="margin-bottom:10px">
+    <div class="panel-title" style="margin-bottom:6px">
       Peer group ranking
       <span class="badge badge-gold" id="peerGroupBadge">—</span>
     </div>
-    <div style="font-size:11px; color:var(--text3); margin-bottom:8px" id="peerGroupNote">—</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:12px" id="peerGroupNote">—</div>
+    <div class="peer-switch">
+      <button class="ps-btn" onclick="setPeerSort('inv',this)">Investment</button>
+      <button class="ps-btn" onclick="setPeerSort('gl',this)">Gold Loan</button>
+      <button class="ps-btn on" onclick="setPeerSort('both',this)">Both</button>
+    </div>
     <table class="peer-table" id="peerTable"></table>
   </div>
 </div>
@@ -334,6 +344,9 @@ input[type=range]{accent-color:var(--accent);width:110px;cursor:pointer}
 const STUDY = new Date(2026, 4, 2);
 let ALL = [];
 let curTab = 'top';
+let peerSortMode = 'both';
+let currentPerson = null;
+let currentTargetPeers = [];
 
 
 
@@ -605,42 +618,10 @@ async function loadProfile(){
     `Vintage peer group (±1yr): ${vintPeers.length} staff · Rank #${rankInVint} within group`;
 
  
-/* ── Peer table (Pinned Selected Staff to Top) ── */
-// 1. Get the top 8 peers for this target group
-let topPeers = targetPeers.slice(0, 8);
-
-// 2. Remove the selected person if they are already in the top 8 to avoid duplication
-topPeers = topPeers.filter(d => d.name !== name);
-
-// 3. Create a new array with the selected person at the very top, followed by the top peers
-const displayPeers = [person, ...topPeers.slice(0, 7)];
-
-const maxT = targetPeers.length ? targetPeers[0].tot : 100;
-
-document.getElementById('peerTable').innerHTML = `
-  <thead><tr>
-    <th style="width:32px">Rank</th><th>Name</th><th>Branch</th><th>Vintage</th>
-    <th>INV O/S</th><th>GL O/S</th><th style="min-width:120px">Total Score</th>
-  </tr></thead>
-  <tbody>${displayPeers.map((d, i) => {
-    const isMe = d.name === name;
-    // Find actual rank in the full target group
-    const actualRank = targetPeers.findIndex(p => p.name === d.name) + 1;
-    
-    return `<tr class="${isMe ? 'me' : ''}">
-      <td><span class="rank-chip ${actualRank === 1 ? 'g' : actualRank === 2 ? 's' : actualRank === 3 ? 'b' : ''}">${actualRank}</span></td>
-      <td style="font-weight:${isMe ? '600' : '400'}">${d.name}${isMe ? '<span class="you-tag">YOU</span>' : ''}</td>
-      <td style="color:var(--text2)">${d.branch}</td>
-      <td style="color:var(--text3)">${d.vy}y</td>
-      <td style="font-variant-numeric:tabular-nums">₹${fmt(d.oI)}</td>
-      <td style="font-variant-numeric:tabular-nums">₹${fmt(d.oG)}</td>
-      <td><div class="sbar-wrap">
-        <div class="sbar-bg"><div class="sbar-fill" style="width:${(d.tot / Math.max(maxT, 1) * 100).toFixed(1)}%"></div></div>
-        <span class="sbar-num">${d.tot.toFixed(1)}</span>
-      </div></td>
-    </tr>`;
-  }).join('')}
-  </tbody>`;
+/* ── Store peers for re-sort ── */
+  currentPerson = person;
+  currentTargetPeers = targetPeers;
+  renderPeerTable();
 
   /* ── AI Bullets ── */
   document.getElementById('aiBullets').innerHTML=`
@@ -774,6 +755,69 @@ function buildFallbackBullets(p, oRank, tRank, vRank, tPeers, vPeers, avgT, avgV
       text: `<strong>Verdict:</strong> Investment is <span class="${invV.color}">${invV.text}</span> Gold Loan is <span class="${glV.color}">${glV.text}</span>`
     }
   ].map(b => `<li class="ai-bullet"><span class="bullet-icon">${b.icon}</span><span class="bullet-text">${b.text}</span></li>`).join('');
+}
+
+/* ═══ PEER TABLE RENDER + SORT ═══ */
+function setPeerSort(mode, el){
+  peerSortMode = mode;
+  document.querySelectorAll('.ps-btn').forEach(b=>b.classList.remove('on'));
+  el.classList.add('on');
+  renderPeerTable();
+}
+
+function renderPeerTable(){
+  if(!currentPerson || !currentTargetPeers.length) return;
+  const p = currentPerson;
+  const name = p.name;
+
+  /* Sort all peers by chosen metric */
+  let sorted;
+  if(peerSortMode === 'inv')       sorted = [...currentTargetPeers].sort((a,b)=>b.sI -a.sI);
+  else if(peerSortMode === 'gl')   sorted = [...currentTargetPeers].sort((a,b)=>b.sG -a.sG);
+  else                             sorted = [...currentTargetPeers].sort((a,b)=>b.tot-a.tot);
+
+  /* Pin selected staff to row 1; rest follow in sort order */
+  const others  = sorted.filter(d=>d.name !== name);
+  const display = [p, ...others];
+
+  /* Max value for bar scaling */
+  const maxVal = peerSortMode==='inv' ? Math.max(...sorted.map(d=>d.sI),1)
+               : peerSortMode==='gl'  ? Math.max(...sorted.map(d=>d.sG),1)
+               :                        Math.max(...sorted.map(d=>d.tot),1);
+
+  const scoreCol = peerSortMode==='inv' ? 'INV Score'
+                 : peerSortMode==='gl'  ? 'GL Score'
+                 :                        'Total Score';
+
+  document.getElementById('peerTable').innerHTML = `
+    <thead><tr>
+      <th style="width:32px">Rank</th>
+      <th>Name</th>
+      <th>Branch</th>
+      <th>Vintage</th>
+      <th>INV O/S</th>
+      <th>GL O/S</th>
+      <th style="min-width:130px">${scoreCol}</th>
+    </tr></thead>
+    <tbody>${display.map(d=>{
+      const isMe = d.name === name;
+      const rank = sorted.findIndex(x=>x.name===d.name)+1;
+      const val  = peerSortMode==='inv' ? d.sI : peerSortMode==='gl' ? d.sG : d.tot;
+      const rc   = rank===1?'g':rank===2?'s':rank===3?'b':'';
+      return `<tr class="${isMe?'me':''}">
+        <td><span class="rank-chip ${rc}">${rank}</span></td>
+        <td style="font-weight:${isMe?'600':'400'}">${d.name}${isMe?'<span class="you-tag">YOU</span>':''}</td>
+        <td style="color:var(--text2)">${d.branch}</td>
+        <td style="color:var(--text3)">${d.vy}y</td>
+        <td style="font-variant-numeric:tabular-nums">₹${fmt(d.oI)}</td>
+        <td style="font-variant-numeric:tabular-nums">₹${fmt(d.oG)}</td>
+        <td><div class="sbar-wrap">
+          <div class="sbar-bg"><div class="sbar-fill" style="width:${(val/maxVal*100).toFixed(1)}%"></div></div>
+          <span class="sbar-num">${val.toFixed(1)}</span>
+        </div></td>
+      </tr>`;
+    }).join('')}
+    </tbody>`;
 }
 
 /* ═══ EXPORT ═══ */
