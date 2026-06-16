@@ -676,6 +676,7 @@
   <a href="staff_dashboard.html" class="nav-link">Staff Productivity</a>
   <span id="adminReportLink" style="display:none">
     <a href="admin_report.html" class="nav-link admin-link">📋 Admin Report</a>
+    <a href="#" onclick="openSNLReview();return false;" class="nav-link admin-link">🏢 SNL Review</a>
   </span>
   <select id="branchSel" onchange="onBranch()" style="display:none"></select>
   <select id="modeSel" onchange="onMode()">
@@ -703,6 +704,26 @@
 </div>
 
 <script>
+/* ── SSO SEED ──
+   When this page is opened from another SML dashboard via openSNLReview(),
+   it arrives with ?sso=1&brToken=...&brRole=... in the URL.
+   Seed localStorage from those params before the SESSION check below runs,
+   so the user lands directly on the dashboard without seeing the login page.
+   The params are then stripped from the URL for cleanliness.
+*/
+(function() {
+  const p = new URLSearchParams(window.location.search);
+  if (p.get("sso") === "1") {
+    ["brToken","brRole","brBranch","brName","brEmpId","brLoginDate"].forEach(k => {
+      const v = p.get(k);
+      if (v) localStorage.setItem(k, v);
+    });
+    // Clean the URL — replace the current history entry without the params
+    const clean = window.location.pathname;
+    window.history.replaceState(null, "", clean);
+  }
+})();
+
 const API      = "https://script.google.com/macros/s/AKfycbxCPUgEROwobfkforYE-259KkRlXSrfAz8HyVDVMwhQ5WXk4avLxJTTk8QkBQV7aVyL/exec";
 const AUTH_URL = "https://script.google.com/macros/s/AKfycby23RcAt1JXHScq5dPGgSqvxjTB_kzA2wud8Qv9Kl9LThDjGOSQWIc9k16n1cQvOo5b/exec";
 
@@ -798,12 +819,80 @@ function setupRoleUI() {
   }
 }
 
+const RD_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTxcZ5BVpz-jvCQze4msaEqv1uSUTS-Z-mulCPYUU9xvh0_8R4aDoMmOIMclJQbIeeVWAtA9qkyJ8Vv/pub?gid=658458096&single=true&output=csv";
+
+async function fetchRDOutstanding() {
+  try {
+    const res = await fetch(RD_CSV_URL);
+    const text = await res.text();
+    const rows = text.split('\n');
+    if (rows.length < 2) return {};
+
+    const headers = rows[0].split(',').map(h => h.trim());
+    const nameIdx = headers.indexOf('Staff Members');
+    const compIdx = headers.indexOf('Company');
+    const outIdx  = headers.indexOf('Total Outstanding');
+
+    if (nameIdx === -1 || compIdx === -1 || outIdx === -1) return {};
+
+    const rdMap = {};
+    for (let i = 1; i < rows.length; i++) {
+      if (!rows[i].trim()) continue;
+
+      // Custom parser to handle quotes and commas inside numbers (e.g., "5,00,000")
+      let cols = [];
+      let current = "";
+      let inQuotes = false;
+      for (let char of rows[i]) {
+        if (char === '"') inQuotes = !inQuotes;
+        else if (char === ',' && !inQuotes) { cols.push(current); current = ""; }
+        else current += char;
+      }
+      cols.push(current);
+
+      const comp = (cols[compIdx] || "").trim();
+      
+      // Filter for SML only
+      if (comp === "SML") {
+        const name = (cols[nameIdx] || "").trim();
+        // Remove formatting characters to get a clean float
+        const outValStr = (cols[outIdx] || "").replace(/,/g, '').replace(/"/g, '').trim();
+        const outVal = parseFloat(outValStr) || 0;
+        
+        if (name) rdMap[name.toLowerCase()] = outVal;
+      }
+    }
+    return rdMap;
+  } catch (e) {
+    console.error("Error fetching RD CSV:", e);
+    return {};
+  }
+}
+
 async function load() {
   try {
     const r = await fetch(API + "?token=" + encodeURIComponent(SESSION_TOKEN));
     const j = await r.json();
     if (j.error === "unauthorized") { doLogout(); return; }
     allData = j.branches;
+
+    // ━━━ INJECT RD OUTSTANDING FROM CSV ━━━
+    const rdMap = await fetchRDOutstanding();
+    allData.forEach(b => {
+      (b.staff || []).forEach(s => {
+        const sName = s.name.trim().toLowerCase();
+        if (rdMap[sName] !== undefined) {
+          // Initialize RD object if it doesn't exist for this staff member yet
+          if (!s.metrics["RD"]) {
+            s.metrics["RD"] = { monthlyAchievement: {}, monthlyTarget: 0 };
+          }
+          // Set the outstanding value
+          s.metrics["RD"].outstanding = rdMap[sName];
+        }
+      });
+    });
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
     setupRoleUI();
     if (SESSION_ROLE === "admin") {
       const sel = document.getElementById("branchSel");
@@ -840,6 +929,20 @@ function onBranch() {
 }
 
 function doLogout() { localStorage.clear(); window.location.href = "login.html"; }
+
+function openSNLReview() {
+  // Pass current session to snlreview.netlify.app via URL params.
+  // The SNL site seeds its own localStorage from these params on load, bypassing its login page.
+  const p = new URLSearchParams({
+    brToken:     localStorage.getItem("brToken")     || "",
+    brRole:      localStorage.getItem("brRole")      || "",
+    brBranch:    localStorage.getItem("brBranch")    || "",
+    brName:      localStorage.getItem("brName")      || "",
+    brEmpId:     localStorage.getItem("brEmpId")     || "",
+    brLoginDate: localStorage.getItem("brLoginDate") || ""
+  });
+  window.open("https://snlreview.netlify.app/?sso=1&" + p.toString(), "_blank");
+}
 
 async function markReviewed() {
   const btn = document.getElementById("reviewedBtn");
