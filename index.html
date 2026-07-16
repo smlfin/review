@@ -1185,6 +1185,32 @@ const AUTH_URL = "https://script.google.com/macros/s/AKfycby23RcAt1JXHScq5dPGgSq
 
 const MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
+/* ━━━ DOJ-BASED TARGET PRORATION ━━━
+   Staff who joined ON OR AFTER 01-Apr-2026 should have their target calculated
+   only for full actual months worked — the joining month itself is excluded
+   (e.g. joined 10-May-2026 → target starts from Jun onwards).
+   Staff who joined before 01-Apr-2026 are unaffected (full period target applies). */
+const FY_TARGET_START = new Date(2026, 3, 1); // 01-Apr-2026
+
+function parseDOJDate(dojStr) {
+  if (!dojStr) return null;
+  const parts = dojStr.split("-");
+  if (parts.length !== 3) return null;
+  const d = new Date(`${parts[1]} ${parts[0]}, ${parts[2]}`);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/* Given a staff's DOJ string and a list of month labels (subset of MONTHS),
+   returns the subset of months that should count toward target for that staff. */
+function getEffectiveMonths(dojStr, months) {
+  const dojDate = parseDOJDate(dojStr);
+  if (!dojDate || dojDate < FY_TARGET_START) return months; // no proration needed
+  const dojMonthAbbr = dojDate.toLocaleString('en-US', { month: 'short' });
+  const dojIdx = MONTHS.indexOf(dojMonthAbbr);
+  if (dojIdx === -1) return []; // joined outside the tracked Apr–Dec window (e.g. next FY) — no target yet
+  return months.filter(m => MONTHS.indexOf(m) > dojIdx);
+}
+
 const PLABEL = {
   Investment:   "Investment",
   RD:           "Recurring Deposit",
@@ -1626,10 +1652,11 @@ function onMode() {
   render();
 }
 
-function calc(metric, months) {
+function calc(metric, months, doj) {
+  const useMonths = doj ? getEffectiveMonths(doj, months) : months;
   let ach = 0;
-  months.forEach(m => ach += (metric.monthlyAchievement[m] || 0));
-  const tgt = (metric.monthlyTarget || 0) * months.length;
+  useMonths.forEach(m => ach += (metric.monthlyAchievement[m] || 0));
+  const tgt = (metric.monthlyTarget || 0) * useMonths.length;
   const pct = tgt > 0 ? Math.round(ach / tgt * 100) : 0;
   return { ach, tgt, pct, gap: ach - tgt };
 }
@@ -1756,7 +1783,7 @@ function renderSnap(staff, months) {
       if (!totals[k]) totals[k] = { tgt: 0, ach: 0 };
       const metric = s.metrics[k];
       months.forEach(m => { totals[k].ach += (metric.monthlyAchievement[m] || 0); });
-      if (k !== "BusinessLoan") { totals[k].tgt += (metric.monthlyTarget || 0) * months.length; }
+      if (k !== "BusinessLoan") { totals[k].tgt += (metric.monthlyTarget || 0) * getEffectiveMonths(s.doj, months).length; }
     }
   });
   if (totals["BusinessLoan"]) {
@@ -1777,7 +1804,7 @@ function renderSnap(staff, months) {
       if (k === "BusinessLoan") continue;
       const metric = s.metrics[k];
       months.forEach(m => { sa += (metric.monthlyAchievement[m] || 0); });
-      st += (metric.monthlyTarget || 0) * months.length;
+      st += (metric.monthlyTarget || 0) * getEffectiveMonths(s.doj, months).length;
     }
     if (st > 0 && sa >= st) onTgt++;
   });
@@ -1883,7 +1910,7 @@ function renderStaff(staff, months) {
     let prodsHTML = "";
 
     for (let k in s.metrics) {
-      const r      = calc(s.metrics[k], months);
+      const r      = calc(s.metrics[k], months, s.doj);
       const metric = s.metrics[k];
       const dot    = PROD_COLOR[k] || "#94a3b8";
 
@@ -1905,7 +1932,7 @@ function renderStaff(staff, months) {
         const gapStr = r.gap >= 0 ? "+" + fmtFull(r.gap, k) : fmtFull(r.gap, k);
 
         /* YTD gap */
-        const ytdR    = calc(metric, ytdMonths);
+        const ytdR    = calc(metric, ytdMonths, s.doj);
         const ytdGap  = ytdR.gap;
         const ytdCls  = ytdGap > 0 ? "pos" : ytdGap < 0 ? "neg" : "neu";
         const ytdStr  = ytdGap >= 0 ? "+" + fmtFull(ytdGap, k) : fmtFull(ytdGap, k);
@@ -2014,7 +2041,7 @@ function renderRank(staff, months) {
     let a = 0, t = 0;
     for (let k in s.metrics) {
       if (k === "BusinessLoan") continue;
-      const r = calc(s.metrics[k], months); a += r.ach; t += r.tgt;
+      const r = calc(s.metrics[k], months, s.doj); a += r.ach; t += r.tgt;
     }
     return { name: s.name, ach: a, tgt: t, pct: t > 0 ? Math.round(a/t*100) : 0 };
   }).sort((a,b) => b.pct - a.pct);
@@ -2057,7 +2084,7 @@ function renderRank(staff, months) {
       });
     } else {
       const ps = staff.map(s => {
-        const r = s.metrics[p] ? calc(s.metrics[p], months) : {ach:0,tgt:0,pct:0,gap:0};
+        const r = s.metrics[p] ? calc(s.metrics[p], months, s.doj) : {ach:0,tgt:0,pct:0,gap:0};
         return { name: s.name, ...r };
       }).sort((a,b) => b.pct - a.pct);
       ps.forEach((s,i) => {
@@ -2082,7 +2109,7 @@ function renderCorrective(staff, months) {
   staff.forEach(s => {
     for (let k in s.metrics) {
       if (k === "BusinessLoan") continue;
-      const r = calc(s.metrics[k], months);
+      const r = calc(s.metrics[k], months, s.doj);
       if (r.pct < 100) actions.push({ staff: s.name, product: k, pct: r.pct, ach: r.ach, tgt: r.tgt, gap: r.gap });
     }
   });
@@ -2184,7 +2211,8 @@ function renderTrend(staff, months) {
 function openBreak(sname, pkey, metric) {
   document.getElementById("modalTitle").textContent = sname + " — " + (PLABEL[pkey]||pkey);
   const months = getMonths();
-  const r  = calc(metric, months);
+  const dojForStaff = (branch.staff || []).find(x => x.name === sname)?.doj;
+  const r  = calc(metric, months, dojForStaff);
   const mt = metric.monthlyTarget || 0;
   let rows = MONTHS.map((m, idx) => {
     const v   = metric.monthlyAchievement[m] || 0;
@@ -2338,7 +2366,7 @@ function openStaffProfile(sname) {
     let a = 0, t = 0;
     for (let k in x.metrics) {
       if (k === "BusinessLoan") continue;
-      const r = calc(x.metrics[k], months); a += r.ach; t += r.tgt;
+      const r = calc(x.metrics[k], months, x.doj); a += r.ach; t += r.tgt;
     }
     return { name: x.name, pct: t > 0 ? Math.round(a / t * 100) : 0 };
   }).sort((a, b) => b.pct - a.pct);
@@ -2355,7 +2383,7 @@ function openStaffProfile(sname) {
       prodSummaries.push({ key: k, label: PLABEL[k] || k, ach, tgt: null, pct: null, gap: null, metric });
       continue;
     }
-    const r = calc(metric, months);
+    const r = calc(metric, months, s.doj);
     overallAch += r.ach; overallTgt += r.tgt;
     prodSummaries.push({ key: k, label: PLABEL[k] || k, ach: r.ach, tgt: r.tgt, pct: r.pct, gap: r.gap, metric });
   }
@@ -2400,7 +2428,11 @@ function openStaffProfile(sname) {
 
   /* ── Products & Outstanding summary (figures only) ── */
   const ytdMonths = MONTHS.slice(0, MONTHS.indexOf(lastSelMonth) + 1);
-  const ytdLabel  = ytdMonths.length === 1 ? ytdMonths[0] : `Apr–${lastSelMonth}`;
+  /* Restrict displayed months to those on/after the staff's actual joining month */
+  const profileMonths = getEffectiveMonths(s.doj, ytdMonths);
+  const ytdLabel  = profileMonths.length === 0 ? "—"
+                    : profileMonths.length === 1 ? profileMonths[0]
+                    : `${profileMonths[0]}–${lastSelMonth}`;
 
   let outCardsHTML = "";
   prodSummaries.forEach(p => {
@@ -2431,28 +2463,28 @@ function openStaffProfile(sname) {
 
     if (p.key === "BusinessLoan") {
       const thisMonthAch = (p.metric.monthlyAchievement[lastSelMonth] || 0);
-      let ytdAch = 0; ytdMonths.forEach(m => ytdAch += (p.metric.monthlyAchievement[m] || 0));
+      let ytdAch = 0; profileMonths.forEach(m => ytdAch += (p.metric.monthlyAchievement[m] || 0));
       statsHTML = `
         <div class="prof-subhead">This Month (${lastSelMonth})</div>
         <div class="prof-stats-grid" style="grid-template-columns:1fr">
           <div class="prof-stat"><div class="prof-stat-v">${fmtFull(thisMonthAch, p.key)}</div><div class="prof-stat-l">Achievement</div></div>
         </div>
-        <div class="prof-subhead">Since April (${ytdLabel})</div>
+        <div class="prof-subhead">YTD (${ytdLabel})</div>
         <div class="prof-stats-grid" style="grid-template-columns:1fr">
           <div class="prof-stat"><div class="prof-stat-v">${fmtFull(ytdAch, p.key)}</div><div class="prof-stat-l">Achievement</div></div>
         </div>
         <div style="font-size:10.5px;color:var(--text3);margin-top:6px">Business Loan target is set at branch level, not per staff member.</div>`;
-      const rows = ytdMonths.map(m => `
+      const rows = profileMonths.map(m => `
         <tr><td>${m}</td><td>${fmtFull(p.metric.monthlyAchievement[m] || 0, p.key)}</td></tr>`).join("");
       tableHTML = `
-        <div class="prof-subhead">Month-wise Achievement — April Onwards</div>
+        <div class="prof-subhead">Month-wise Achievement — ${profileMonths.length ? profileMonths[0] : "—"} Onwards</div>
         <table class="prof-figure-table">
           <thead><tr><th>Month</th><th>Achievement</th></tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody>${rows || `<tr><td colspan="2" style="text-align:center;color:var(--text3)">No months yet since joining</td></tr>`}</tbody>
         </table>`;
     } else {
-      const tm  = calc(p.metric, [lastSelMonth]);
-      const ytd = calc(p.metric, ytdMonths);
+      const tm  = calc(p.metric, [lastSelMonth], s.doj);
+      const ytd = calc(p.metric, ytdMonths, s.doj);
       const gapClass = v => v > 0 ? "prof-gap-pos" : v < 0 ? "prof-gap-neg" : "prof-gap-neu";
       statsHTML = `
         <div class="prof-subhead">This Month (${lastSelMonth})</div>
@@ -2461,7 +2493,7 @@ function openStaffProfile(sname) {
           <div class="prof-stat"><div class="prof-stat-v">${fmtFull(tm.ach, p.key)}</div><div class="prof-stat-l">Performance</div></div>
           <div class="prof-stat"><div class="prof-stat-v ${gapClass(tm.gap)}">${tm.gap >= 0 ? "+" : ""}${fmtFull(tm.gap, p.key)}</div><div class="prof-stat-l">Gap</div></div>
         </div>
-        <div class="prof-subhead">Since April (${ytdLabel})</div>
+        <div class="prof-subhead">YTD (${ytdLabel})</div>
         <div class="prof-stats-grid">
           <div class="prof-stat"><div class="prof-stat-v">${fmtFull(ytd.tgt, p.key)}</div><div class="prof-stat-l">Target</div></div>
           <div class="prof-stat"><div class="prof-stat-v">${fmtFull(ytd.ach, p.key)}</div><div class="prof-stat-l">Performance</div></div>
@@ -2481,7 +2513,7 @@ function openStaffProfile(sname) {
           </span>
         </div>`;
       }
-      const rows = ytdMonths.map(m => {
+      const rows = profileMonths.map(m => {
         const v    = p.metric.monthlyAchievement[m] || 0;
         const mt   = p.metric.monthlyTarget || 0;
         const gap  = v - mt;
@@ -2495,10 +2527,10 @@ function openStaffProfile(sname) {
         </tr>`;
       }).join("");
       tableHTML = `
-        <div class="prof-subhead">Month-wise — April Onwards</div>
+        <div class="prof-subhead">Month-wise — ${profileMonths.length ? profileMonths[0] : "—"} Onwards</div>
         <table class="prof-figure-table">
           <thead><tr><th>Month</th><th>Target</th><th>Achievement</th><th>Gap</th><th>Attainment</th></tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody>${rows || `<tr><td colspan="5" style="text-align:center;color:var(--text3)">No months yet since joining</td></tr>`}</tbody>
         </table>`;
     }
 
@@ -2671,10 +2703,11 @@ function doExport() {
     return num < 0 ? `<span class="neg">${v}</span>` : `<span class="pos">+${v.replace(/^₹/,"")}</span>`;
   }
 
-  function calcYTD(metric) {
+  function calcYTD(metric, doj) {
+    const useYTD = doj ? getEffectiveMonths(doj, YTD_MONTHS) : YTD_MONTHS;
     let ytdAch = 0;
-    YTD_MONTHS.forEach(m => ytdAch += (metric.monthlyAchievement[m] || 0));
-    const ytdTgt = (metric.monthlyTarget || 0) * YTD_MONTHS.length;
+    useYTD.forEach(m => ytdAch += (metric.monthlyAchievement[m] || 0));
+    const ytdTgt = (metric.monthlyTarget || 0) * useYTD.length;
     return { ytdAch: exact(ytdAch), ytdTgt: exact(ytdTgt), shortfall: exact(ytdAch - ytdTgt) };
   }
 
@@ -2683,8 +2716,8 @@ function doExport() {
   staff.forEach(s => {
     for (let k in s.metrics) {
       if (!totals[k]) totals[k] = { ach:0, tgt:0, ytdAch:0, ytdTgt:0 };
-      const r   = calc(s.metrics[k], months);
-      const ytd = calcYTD(s.metrics[k]);
+      const r   = calc(s.metrics[k], months, s.doj);
+      const ytd = calcYTD(s.metrics[k], s.doj);
       totals[k].ach    += exact(r.ach);
       totals[k].ytdAch += ytd.ytdAch;
       if (k !== "BusinessLoan") { totals[k].tgt += exact(r.tgt); totals[k].ytdTgt += ytd.ytdTgt; }
@@ -2720,8 +2753,8 @@ function doExport() {
   function buildCombinedRows(s) {
     return Object.keys(s.metrics).map(k => {
       const metric = s.metrics[k];
-      const r      = calc(metric, months);
-      const ytd    = calcYTD(metric);
+      const r      = calc(metric, months, s.doj);
+      const ytd    = calcYTD(metric, s.doj);
       const isBL   = k === "BusinessLoan";
       const ma     = metric.monthlyAchievement || {};
       const mt     = metric.monthlyTarget || 0;
