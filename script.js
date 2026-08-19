@@ -1777,8 +1777,12 @@ function renderCommitmentsModal(loadFailed) {
     </div>`;
   }
 
+  const saveNotice = window.__commitSaveNotice;
+  window.__commitSaveNotice = null; // one-shot — don't keep showing it on later re-renders
+
   document.getElementById("modalBody").innerHTML = `
     ${loadFailed ? `<div style="margin-bottom:10px;padding:8px 10px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;font-size:11.5px;color:#92400e">⚠️ Couldn't load the latest data (connection hiccup) — showing what's cached. <span style="text-decoration:underline;cursor:pointer" onclick='openCommitments(${attrJSON(branchName)})'>Retry</span></div>` : ""}
+    ${saveNotice ? `<div style="margin-bottom:10px;padding:8px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:11.5px;color:${saveNotice.color}">${saveNotice.text}</div>` : ""}
     <div style="margin-bottom:12px;font-size:12px;color:var(--text3)">
       Commitments made for <b>${viewMonth}</b>${prevMonth ? ` and carried over from <b>${prevMonth}</b> for review` : ""} — a commitment stays visible for the month it's made and the following month only.
     </div>
@@ -1899,11 +1903,39 @@ async function saveCommitments() {
     return;
   }
 
-  // The published CSV read path can lag a few minutes behind Google's own
-  // publish schedule, so re-fetching it immediately after a save would often
-  // show the OLD data and look like the save didn't take. Instead, merge the
-  // just-saved entries straight into the on-screen table (we know exactly
-  // what we sent), and let the next natural CSV refresh reconcile it later.
+  // no-cors means we truly cannot read anything back from that POST — it
+  // "succeeding" only tells us the request was sent, not that the sheet was
+  // actually updated. So confirm for real: read the sheet back via COMMIT_API
+  // (live data, not the published CSV, which lags) and check our entries
+  // actually landed before telling the user it saved.
+  msg.textContent = "Saving… confirming with the server.";
+  msg.style.color = "var(--text3)";
+  let confirmed = false;
+  try {
+    const res  = await fetch(COMMIT_API + "?branch=" + encodeURIComponent(window.__commitBranch) + "&month=" + encodeURIComponent(realCurMonth));
+    const data = await res.json();
+    if (data.ok) {
+      const serverRows = data.rows || [];
+      confirmed = entries.every(en => serverRows.some(r =>
+        r.employeeName === en.employeeName && r.product === en.product &&
+        Number(r.commitment) === Number(en.commitment)
+      ));
+    }
+  } catch (e) {
+    console.error("Post-save confirmation read failed", e);
+  }
+
+  if (!confirmed) {
+    msg.textContent = "⚠️ Could not confirm this reached the server — it may not have saved. Please check the sheet directly, or try again.";
+    msg.style.color = "#dc2626";
+    btn.disabled = false; btn.textContent = "Save Commitment";
+    return;
+  }
+
+  // Confirmed on the server. The published CSV read path (used elsewhere in
+  // this modal) can still lag a few minutes behind Google's publish schedule,
+  // so we merge the confirmed entries straight into the on-screen table
+  // rather than waiting on the CSV to catch up.
   entries.forEach(en => {
     const key = en.employeeName + "||" + en.product + "||" + realCurMonth;
     window.__commitLatest[key] = {
@@ -1922,9 +1954,8 @@ async function saveCommitments() {
     }));
   }
 
-  msg.textContent = "Saved. (Note: the shared view can take a few minutes to catch up for others, since it reads a published sheet.)";
-  msg.style.color = "#16a34a";
-  renderCommitmentsModal(false); // refresh table immediately with the newly saved commitment
+  window.__commitSaveNotice = { text: "✓ Saved and confirmed on the server.", color: "#16a34a" };
+  renderCommitmentsModal(false); // refresh table immediately with the newly saved, confirmed commitment
 }
 
 function maybeClose(e) { if (e.target === document.getElementById("overlay")) closeModal(); }
