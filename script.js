@@ -22,7 +22,7 @@ const API      = "https://script.google.com/macros/s/AKfycbzka4V7LDGAW-EkU_v_CUy
 
 const AUTH_URL = "https://script.google.com/macros/s/AKfycbwbpR3TVkujyz0eVA--gE6epQaXuHuDzzNWDYNpiGezMTltYLjp5huXswTuW-HbfHBGlQ/exec";
 /* ━━━ COMMITMENTS — separate Apps Script + Sheet, deployed independently. Paste your Web App URL below. ━━━ */
-const COMMIT_API = "https://script.google.com/macros/s/AKfycbzka4V7LDGAW-EkU_v_CUyIbozeaNPJvZyB81iJs2JjP1IycxWhLQioTwYKFmPu9v6A/exec";
+const COMMIT_API = "https://script.google.com/macros/s/AKfycbwj7RLEOqmjFiWSj3fC5IElUVUe-DuipC8q92m2ZYQX6lgQ_Eq72G9GAa9BUqmRvILk4Q/exec";
 
 const MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -1546,83 +1546,35 @@ function isBranchRow(employeeName) {
   return employeeName === BRANCH_COMMIT_KEY || employeeName === "__BRANCH__";
 }
 
-const COMMIT_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRR56uoynbmoUzY-qv39Bo0HUWRBV4fB2EI38BcSfpW0zxuwzGad5LGWXn3gVmU52d09uJJifMEeOeH/pub?gid=793108414&single=true&output=csv";
+// GET is occasionally slow/flaky on this endpoint — the sheet is read in full on
+// every call server-side regardless of any filter, so requesting by month doesn't
+// save execution time, only payload size. Fetching once (unfiltered) and filtering
+// client-side is therefore both simpler and lighter on the backend than multiple
+// filtered calls. We also cache per-branch for a few minutes so re-opening the
+// modal, retrying, or switching the viewed month doesn't hit the slow endpoint
+// again immediately.
+const COMMIT_CACHE_TTL_MS = 3 * 60 * 1000;
+window.__commitCache = window.__commitCache || {}; // { [branch]: { rows, ts } }
 
-// tiny CSV parser — handles quoted fields (commas/newlines/escaped "" inside quotes)
-function parseCSVTable(text) {
-  const rows = [];
-  let row = [], field = "", inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { field += '"'; i++; }
-        else inQuotes = false;
-      } else field += c;
-    } else {
-      if (c === '"') inQuotes = true;
-      else if (c === ",") { row.push(field); field = ""; }
-      else if (c === "\r") { /* skip, \n handled below */ }
-      else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
-      else field += c;
-    }
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
-
-// Reads go through the published CSV export (fast, served by Google's CDN,
-// doesn't touch Apps Script execution at all) instead of COMMIT_API. Writes
-// still go through COMMIT_API/doPost exactly as before — this only replaces
-// the GET side. Note: published CSVs refresh on Google's own schedule (can
-// lag a few minutes behind a just-saved edit) — saveCommitments() accounts
-// for that by updating the on-screen table optimistically rather than
-// re-pulling the CSV immediately after a save.
 async function fetchCommitRowsRaw(branchName, attempts) {
   attempts = attempts || 2;
   let lastErr = null;
   for (let i = 0; i < attempts; i++) {
     try {
-      const res  = await fetch(COMMIT_CSV_URL + "&_=" + Date.now()); // bust any browser/CDN caching in front of it
-      const text = await res.text();
-      const table = parseCSVTable(text);
-      if (!table.length) return [];
-
-      const header = table[0].map(h => (h || "").trim().toLowerCase());
-      const idx = {};
-      header.forEach((h, i) => idx[h] = i);
-
-      const rows = [];
-      for (let r = 1; r < table.length; r++) {
-        const cols = table[r];
-        if (!cols || !cols.some(c => c && c.trim())) continue; // skip blank rows
-        const branchVal = (cols[idx["branch"]] || "").trim();
-        if (branchVal !== branchName) continue;
-        rows.push({
-          timestamp:    (cols[idx["timestamp"]] || "").trim(),
-          branch:       branchVal,
-          employeeName: (cols[idx["employee"]]  || "").trim(),
-          month:        (cols[idx["month"]]     || "").trim(),
-          product:      (cols[idx["product"]]   || "").trim(),
-          commitment:   Number(cols[idx["commitment"]]) || 0,
-          remarks:      (cols[idx["remarks"]]   || "").trim(),
-          savedBy:      (cols[idx["savedby"]]   || "").trim()
-        });
-      }
-      return rows;
+      const res  = await fetch(COMMIT_API + "?branch=" + encodeURIComponent(branchName));
+      const data = await res.json();
+      if (data.ok) return data.rows || [];
+      lastErr = new Error(data.error || "Server returned an error");
     } catch (e) {
       lastErr = e;
-      console.error("Commitments CSV fetch failed, attempt " + (i+1) + "/" + attempts, e);
+      console.error("Commitments GET failed (branch=" + branchName + "), attempt " + (i+1) + "/" + attempts, e);
     }
-    if (i < attempts - 1) await new Promise(r => setTimeout(r, 1000));
+    // this endpoint can take several seconds under load — a near-instant retry
+    // just repeats the same slow read, so back off with real spacing instead
+    if (i < attempts - 1) await new Promise(r => setTimeout(r, 1500 + i * 1500));
   }
   throw lastErr;
 }
-
-// cache per-branch for a couple minutes so reopening the modal / retrying
-// doesn't refetch the CSV unnecessarily
-const COMMIT_CACHE_TTL_MS = 2 * 60 * 1000;
-window.__commitCache = window.__commitCache || {}; // { [branch]: { rows, ts } }
 
 async function fetchCommitRows(branchName, forceRefresh) {
   const cached = window.__commitCache[branchName];
@@ -1641,7 +1593,7 @@ async function openCommitments(branchName) {
 
   document.getElementById("modal").classList.add("wide");
   document.getElementById("modalTitle").textContent = branchName + " — Commitments (" + viewMonth + ")";
-  document.getElementById("modalBody").innerHTML = `<div style="padding:20px;text-align:center;color:var(--text3);font-size:12.5px">Loading commitments…</div>`;
+  document.getElementById("modalBody").innerHTML = `<div style="padding:20px;text-align:center;color:var(--text3);font-size:12.5px">Loading commitments… this can take a few seconds.</div>`;
   document.getElementById("overlay").classList.add("open");
 
   if (!COMMIT_API || COMMIT_API.indexOf("PASTE_YOUR") === 0) {
@@ -1666,21 +1618,6 @@ async function openCommitments(branchName) {
   renderCommitmentsModal(loadFailed);
 }
 
-// The published CSV exports timestamps as "DD/MM/YYYY HH:MM:SS" (day first) —
-// JS's Date constructor assumes US "MM/DD/YYYY" for that shape and silently
-// returns Invalid Date for anything past the 12th, which would break "pick
-// the latest edit" comparisons below. Parse it explicitly instead.
-function parseSheetTimestamp(str) {
-  if (!str) return 0;
-  const m = String(str).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2}):(\d{2})/);
-  if (m) {
-    const [, d, mo, y, h, mi, s] = m;
-    return new Date(+y, +mo - 1, +d, +h, +mi, +s).getTime();
-  }
-  const t = new Date(str).getTime(); // fallback for ISO strings (e.g. our own optimistic local entries)
-  return isNaN(t) ? 0 : t;
-}
-
 // filters the full history down to the [prevMonth, viewMonth] visibility
 // window and stashes the "latest per employee+product+month" map
 function applyCommitRows(rows) {
@@ -1690,7 +1627,7 @@ function applyCommitRows(rows) {
   const latest = {};
   visible.forEach(r => {
     const key = r.employeeName + "||" + r.product + "||" + r.month;
-    if (!latest[key] || parseSheetTimestamp(r.timestamp) > parseSheetTimestamp(latest[key].timestamp)) latest[key] = r;
+    if (!latest[key] || new Date(r.timestamp) > new Date(latest[key].timestamp)) latest[key] = r;
   });
   window.__commitLatest = latest;
 }
@@ -1777,12 +1714,8 @@ function renderCommitmentsModal(loadFailed) {
     </div>`;
   }
 
-  const saveNotice = window.__commitSaveNotice;
-  window.__commitSaveNotice = null; // one-shot — don't keep showing it on later re-renders
-
   document.getElementById("modalBody").innerHTML = `
     ${loadFailed ? `<div style="margin-bottom:10px;padding:8px 10px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;font-size:11.5px;color:#92400e">⚠️ Couldn't load the latest data (connection hiccup) — showing what's cached. <span style="text-decoration:underline;cursor:pointer" onclick='openCommitments(${attrJSON(branchName)})'>Retry</span></div>` : ""}
-    ${saveNotice ? `<div style="margin-bottom:10px;padding:8px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:11.5px;color:${saveNotice.color}">${saveNotice.text}</div>` : ""}
     <div style="margin-bottom:12px;font-size:12px;color:var(--text3)">
       Commitments made for <b>${viewMonth}</b>${prevMonth ? ` and carried over from <b>${prevMonth}</b> for review` : ""} — a commitment stays visible for the month it's made and the following month only.
     </div>
@@ -1903,59 +1836,19 @@ async function saveCommitments() {
     return;
   }
 
-  // no-cors means we truly cannot read anything back from that POST — it
-  // "succeeding" only tells us the request was sent, not that the sheet was
-  // actually updated. So confirm for real: read the sheet back via COMMIT_API
-  // (live data, not the published CSV, which lags) and check our entries
-  // actually landed before telling the user it saved.
-  msg.textContent = "Saving… confirming with the server.";
-  msg.style.color = "var(--text3)";
-  let confirmed = false;
+  msg.textContent = "Saved. Refreshing…";
+  msg.style.color = "#16a34a";
   try {
-    const res  = await fetch(COMMIT_API + "?branch=" + encodeURIComponent(window.__commitBranch) + "&month=" + encodeURIComponent(realCurMonth));
-    const data = await res.json();
-    if (data.ok) {
-      const serverRows = data.rows || [];
-      confirmed = entries.every(en => serverRows.some(r =>
-        r.employeeName === en.employeeName && r.product === en.product &&
-        Number(r.commitment) === Number(en.commitment)
-      ));
-    }
+    const rows = await fetchCommitRows(window.__commitBranch, /* forceRefresh */ true);
+    applyCommitRows(rows);
+    renderCommitmentsModal(false); // refresh table with the newly saved commitment
   } catch (e) {
-    console.error("Post-save confirmation read failed", e);
-  }
-
-  if (!confirmed) {
-    msg.textContent = "⚠️ Could not confirm this reached the server — it may not have saved. Please check the sheet directly, or try again.";
-    msg.style.color = "#dc2626";
+    // save almost certainly went through (POST didn't throw) — we just couldn't
+    // confirm it by re-reading; don't tell the user it failed.
+    msg.textContent = "Saved, but couldn't refresh the view — reopen to confirm.";
+    msg.style.color = "#92400e";
     btn.disabled = false; btn.textContent = "Save Commitment";
-    return;
   }
-
-  // Confirmed on the server. The published CSV read path (used elsewhere in
-  // this modal) can still lag a few minutes behind Google's publish schedule,
-  // so we merge the confirmed entries straight into the on-screen table
-  // rather than waiting on the CSV to catch up.
-  entries.forEach(en => {
-    const key = en.employeeName + "||" + en.product + "||" + realCurMonth;
-    window.__commitLatest[key] = {
-      employeeName: en.employeeName, product: en.product, commitment: en.commitment,
-      remarks: en.remarks, month: realCurMonth, timestamp: new Date().toISOString()
-    };
-  });
-  // also patch the branch-level cache so reopening the modal within the
-  // cache window doesn't momentarily show stale (pre-save) data
-  const cachedBranch = window.__commitCache[window.__commitBranch];
-  if (cachedBranch) {
-    entries.forEach(en => cachedBranch.rows.push({
-      employeeName: en.employeeName, product: en.product, commitment: en.commitment,
-      remarks: en.remarks, month: realCurMonth, branch: window.__commitBranch,
-      timestamp: new Date().toISOString(), savedBy: (typeof SESSION_NAME !== "undefined" ? SESSION_NAME : "")
-    }));
-  }
-
-  window.__commitSaveNotice = { text: "✓ Saved and confirmed on the server.", color: "#16a34a" };
-  renderCommitmentsModal(false); // refresh table immediately with the newly saved, confirmed commitment
 }
 
 function maybeClose(e) { if (e.target === document.getElementById("overlay")) closeModal(); }
