@@ -115,6 +115,19 @@ const SESSION_NAME   = localStorage.getItem("brName");
 const SESSION_EMPID  = localStorage.getItem("brEmpId");
 const SESSION_DATE   = localStorage.getItem("brLoginDate");
 
+/* ━━━ REVIEW CHECKLIST — only these 21 EmpIDs are designated branch
+   reviewers. They get a "Review Checklist" button (not the old staff
+   self-mark banner) listing their branch's staff by name, with a tick
+   per name. Ticking writes that STAFF MEMBER's reviewed status —
+   independent of who is logged in. Backed by a NEW, separate GS
+   deployment (REVIEW_API below) — Auth.gs is untouched. Fill in
+   REVIEW_API after deploying ReviewWarningMail.gs as a Web App. ━━━ */
+const REVIEW_TAG_IDS = new Set([
+  "4057","1185","4416","4366","4391","4760","4526","4256","4062","4714",
+  "4763","4638","4711","4340","4511","1659","4692","1175","4080","4362","4765"
+]);
+const REVIEW_API = "https://script.google.com/macros/s/AKfycbyF7CqAfU3D3wL5lor-KIS5x7pBHca79h1JChvtcJfgOYncS2Zw8CVunq0fzvPcKeoD/exec";
+
 function todayStr() {
   const d = new Date();
   return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
@@ -135,10 +148,8 @@ function setupRoleUI() {
     document.getElementById("branchSel").style.display = "inline-block";
     document.getElementById("adminReportLink").style.display = "inline";
   }
-  if (SESSION_ROLE === "staff") {
-    const bar = document.getElementById("reviewedBar");
-    bar.style.display = "flex";
-    document.querySelector(".main").style.paddingBottom = "70px";
+  if (SESSION_ROLE === "staff" && REVIEW_TAG_IDS.has(SESSION_EMPID)) {
+    document.getElementById("reviewChecklistBtn").style.display = "inline-block";
   }
 }
 
@@ -662,35 +673,72 @@ function openSNLReview() {
   window.open("https://snlreview.netlify.app/?sso=1&" + p.toString(), "_blank");
 }
 
-async function markReviewed() {
-  const btn = document.getElementById("reviewedBtn");
-  const msg = document.getElementById("reviewedMsg");
-  btn.disabled = true; btn.textContent = "Saving…";
+/* ━━━ REVIEW CHECKLIST MODAL ━━━
+   Old flow (self-mark via AUTH_URL POST) is removed — that endpoint only
+   implements doGet, so the POST call was failing with a network error.
+   This talks to the new REVIEW_API deployment instead, which has a real
+   doGet (read roster) and doPost (write a tick) handler. */
+function openReviewChecklist() {
+  document.getElementById("checklistOverlay").classList.add("open");
+  document.getElementById("checklistModalBody").innerHTML =
+    `<div style="padding:20px;text-align:center;color:#6b7280;font-size:12.5px">Loading your branch's staff…</div>`;
+  loadReviewChecklist();
+}
+function closeReviewChecklist() { document.getElementById("checklistOverlay").classList.remove("open"); }
+function maybeCloseChecklist(e) { if (e.target === document.getElementById("checklistOverlay")) closeReviewChecklist(); }
+
+async function loadReviewChecklist() {
+  const body = document.getElementById("checklistModalBody");
   try {
-    const res  = await fetch(AUTH_URL, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({action:"markReviewed",token:SESSION_TOKEN}) });
+    const url = REVIEW_API + "?action=branchRoster&token=" + encodeURIComponent(SESSION_TOKEN);
+    const res  = await fetch(url);
     const data = await res.json();
-    if (data.ok) {
-      btn.textContent = "✓ Reviewed"; btn.style.background = "#16a34a"; btn.disabled = true;
-      msg.textContent = data.alreadyMarked ? "✅ Already marked as reviewed today." : "✅ Marked as reviewed for today. Thank you!";
-    } else {
-      btn.disabled = false; btn.textContent = "✓ Mark as Reviewed";
-      alert(data.error || "Could not save. Try again.");
+    if (!data.ok) { body.innerHTML = `<div style="padding:20px;text-align:center;color:#991b1b;font-size:12.5px">${data.error || "Could not load roster."}</div>`; return; }
+
+    document.getElementById("checklistModalTitle").textContent = "📝 Review Checklist — " + data.branch;
+
+    if (!data.staff.length) {
+      body.innerHTML = `<div style="padding:20px;text-align:center;color:#6b7280;font-size:12.5px">No staff found for your branch.</div>`;
+      return;
     }
-  } catch(e) { btn.disabled = false; btn.textContent = "✓ Mark as Reviewed"; alert("Network error. Please try again."); }
+
+    body.innerHTML = data.staff.map(s => `
+      <div class="rc-row">
+        <div>
+          <div class="rc-name">${s.name}</div>
+          <div class="rc-id">ID: ${s.empId}</div>
+        </div>
+        ${s.reviewed
+          ? `<span class="rc-done-label">✓ Reviewed</span>`
+          : `<input type="checkbox" class="rc-check" onclick="tickStaffReviewed('${s.empId}', this)">`
+        }
+      </div>`).join("");
+  } catch (e) {
+    body.innerHTML = `<div style="padding:20px;text-align:center;color:#991b1b;font-size:12.5px">Network error. Please try again.</div>`;
+  }
 }
 
-async function checkReviewedStatus() {
-  if (SESSION_ROLE !== "staff") return;
+async function tickStaffReviewed(empId, checkboxEl) {
+  checkboxEl.disabled = true;
   try {
-    const res  = await fetch(AUTH_URL, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({action:"markReviewed",token:SESSION_TOKEN}) });
+    const url = REVIEW_API + "?action=markStaffReviewed"
+      + "&token=" + encodeURIComponent(SESSION_TOKEN)
+      + "&empId=" + encodeURIComponent(empId);
+    const res  = await fetch(url);
     const data = await res.json();
-    if (data.ok && data.alreadyMarked) {
-      document.getElementById("reviewedBtn").textContent      = "✓ Reviewed";
-      document.getElementById("reviewedBtn").style.background = "#16a34a";
-      document.getElementById("reviewedBtn").disabled         = true;
-      document.getElementById("reviewedMsg").textContent      = "✅ Already marked as reviewed today.";
+    if (data.ok) {
+      const row = checkboxEl.closest(".rc-row");
+      row.querySelector(":scope > div:last-child").outerHTML = `<span class="rc-done-label">✓ Reviewed</span>`;
+    } else {
+      checkboxEl.checked = false;
+      checkboxEl.disabled = false;
+      alert(data.error || "Could not save. Try again.");
     }
-  } catch(e) {}
+  } catch (e) {
+    checkboxEl.checked = false;
+    checkboxEl.disabled = false;
+    alert("Network error. Please try again.");
+  }
 }
 
 function getMonths() { return MONTHS.filter(m => selMonths.has(m)); }
@@ -2422,4 +2470,4 @@ ${staffHTML}
 }
 
 /* ── INIT ── */
-load().then(() => checkReviewedStatus());
+load();
