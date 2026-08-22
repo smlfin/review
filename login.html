@@ -104,7 +104,7 @@
 </div>
 
 <script>
-const AUTH_URL = "https://script.google.com/macros/s/AKfycby23RcAt1JXHScq5dPGgSqvxjTB_kzA2wud8Qv9Kl9LThDjGOSQWIc9k16n1cQvOo5b/exec"; // ← paste auth GAS deployment URL
+const AUTH_URL = "https://script.google.com/macros/s/AKfycbwKbot6bvYxcpfyyLjOgnQO_UlEkfkUsvJRRmJiGYmwkaGQM59H5y-DcrQQ9nDOQPUe/exec"; // ← new SecureLogin.gs deployment (Auth.gs is untouched, still used for nothing else here)
 
 let currentTab = "admin";
 
@@ -157,7 +157,8 @@ async function doLogin() {
     const url = AUTH_URL
       + "?action=login"
       + "&username=" + encodeURIComponent(username)
-      + "&password=" + encodeURIComponent(password);
+      + "&password=" + encodeURIComponent(password)
+      + "&loginType=" + encodeURIComponent(currentTab);
 
     const res  = await fetch(url);
     const data = await res.json();
