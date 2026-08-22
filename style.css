@@ -1,4 +1,4 @@
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
       --bg:        #f0f2f8;
@@ -614,35 +614,26 @@
     .closing .out-val  { color: #4338ca; }
     .out-block.closing .out-sub { color: #3730a3; opacity: .85; }
 
-    /* ━━━ REVIEWED BAR ━━━ */
-    #reviewedBar {
-      display: none;
-      position: fixed;
-      bottom: 0; left: 0; right: 0;
-      z-index: 300;
-      background: var(--navy);
-      padding: 11px 18px;
-      flex-direction: row;
+    /* ━━━ REVIEW CHECKLIST (in-modal, not fixed — no longer blocks mobile view) ━━━ */
+    .rc-row {
+      display: flex;
       align-items: center;
       justify-content: space-between;
-      box-shadow: 0 -3px 14px rgba(15,23,80,.22);
-      flex-wrap: wrap;
-      gap: 8px;
-      border-top: 1px solid rgba(255,255,255,.1);
+      padding: 12px 14px;
+      border-bottom: 1px solid #e2e8f4;
+      gap: 10px;
     }
-    #reviewedBtn {
-      padding: 8px 20px;
-      background: #22c55e;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      font-size: 12px;
-      font-weight: 600;
+    .rc-row:last-child { border-bottom: none; }
+    .rc-name { font-size: 13px; font-weight: 600; color: var(--text1, #1a1a2e); }
+    .rc-id { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+    .rc-check {
+      width: 22px; height: 22px;
       cursor: pointer;
-      font-family: inherit;
-      transition: opacity .15s;
+      accent-color: #16a34a;
+      flex-shrink: 0;
     }
-    #reviewedBtn:hover { opacity: .88; }
+    .rc-check:disabled { cursor: not-allowed; opacity: .85; }
+    .rc-done-label { font-size: 11px; color: #16a34a; font-weight: 700; }
 
     /* ━━━ RESPONSIVE ━━━ */
     @media (max-width: 640px) {
