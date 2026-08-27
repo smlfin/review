@@ -126,7 +126,7 @@ const REVIEW_TAG_IDS = new Set([
   "4057","1185","4416","4366","4391","4760","4526","4256","4062","4714",
   "4763","4638","4711","4340","4511","1659","4692","1175","4080","4362","4765"
 ]);
-const REVIEW_API = "https://script.google.com/macros/s/AKfycbyF7CqAfU3D3wL5lor-KIS5x7pBHca79h1JChvtcJfgOYncS2Zw8CVunq0fzvPcKeoD/exec";
+const REVIEW_API = "https://script.google.com/macros/s/AKfycbyx7YCjdyaAUviz3P5JuXObP9q2Y6JNnlHMqTWYT7bjS41Pj-PZdCXEbZFnVvJWRz7g/exec";
 
 function todayStr() {
   const d = new Date();
