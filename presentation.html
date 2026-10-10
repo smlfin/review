@@ -1,409 +1,337 @@
-/* ══════════════════════════════════════════════════════════
-   PRESENTATION MODE
-   New, standalone file. Does NOT modify script.js — only reads
-   its already-loaded globals (allData, MONTHS, PLABEL, PROD_COLOR,
-   getEffectiveMonths, calc, fmt, fmtFull, initials) once load()
-   (inside script.js) has finished populating allData.
-   ══════════════════════════════════════════════════════════ */
-
-const presState = {
-  screen: "branch",      // branch | month | dash | staff
-  branchName: null,
-  months: new Set(),     // subset of MONTHS
-  staffName: null,
-  branchMode: "period"   // period | ytd — toggles the Product Performance cards
-};
-
-/* ── wait for script.js's own load() to finish populating allData ── */
-(function waitForData() {
-  const iv = setInterval(() => {
-    if (typeof allData !== "undefined" && Array.isArray(allData) && allData.length) {
-      clearInterval(iv);
-      presInit();
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Branch Review — Presentation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;1,14..32,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* ══════════════════════════════════════════════════════════
+       PRESENTATION MODE — entirely new styling, does not touch
+       or override style.css. Full-viewport, no page scroll,
+       screen-to-screen click navigation, projector-scale type
+       that also works on a phone (clamp()-based sizing).
+       ══════════════════════════════════════════════════════════ */
+    html, body { height: 100%; overflow: hidden; background: #e6eefc; }
+    #presWrap {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      font-family: 'Inter', system-ui, sans-serif;
+      background: linear-gradient(160deg, #eaf2ff 0%, #dbe8fb 55%, #e3f0fa 100%);
+      color: #0f172a;
     }
-  }, 150);
-})();
-
-function presInit() {
-  document.getElementById("presCrumb").textContent = SESSION_NAME + " · " + (SESSION_ROLE === "admin" ? "All Branches" : SESSION_BRANCH);
-
-  // Non-admin sessions only ever have their own branch in allData (already
-  // filtered by script.js's load()) — skip straight past branch-picking.
-  if (SESSION_ROLE !== "admin" && allData.length === 1) {
-    presSelectBranch(allData[0].branchName);
-    return;
-  }
-  presRenderBranchGrid();
-}
-
-/* ═══════════════ SCREEN SWITCHING ═══════════════ */
-function presShowScreen(name) {
-  document.querySelectorAll(".pres-screen").forEach(s => s.classList.remove("on"));
-  document.getElementById("scr-" + name).classList.add("on");
-  presState.screen = name;
-  document.getElementById("presBackBtn").style.display = name === "branch" ? "none" : "inline-block";
-  presUpdateCrumb();
-}
-
-function presUpdateCrumb() {
-  const parts = [SESSION_NAME];
-  if (presState.branchName) parts.push(presState.branchName);
-  if (presState.months.size) parts.push([...presState.months].sort((a,b)=>MONTHS.indexOf(a)-MONTHS.indexOf(b)).join("+"));
-  if (presState.staffName) parts.push(presState.staffName);
-  document.getElementById("presCrumb").textContent = parts.join(" · ");
-}
-
-function presGoBack() {
-  if (presState.screen === "staff") { presShowScreen("dash"); return; }
-  if (presState.screen === "dash")  { presShowScreen("month"); return; }
-  if (presState.screen === "month") {
-    if (SESSION_ROLE !== "admin") return; // no branch step to go back to
-    presState.branchName = null;
-    presShowScreen("branch");
-    return;
-  }
-}
-
-function toggleFullscreen() {
-  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
-  else document.exitFullscreen();
-}
-
-/* ═══════════════ SCREEN 1 — BRANCH PICKER ═══════════════ */
-function presRenderBranchGrid() {
-  const grid = document.getElementById("branchGrid");
-  grid.innerHTML = allData.map((b, i) => {
-    const agg = presAggregateBranch(b, presCurrentOrDefaultMonths());
-    const pct = presOverallPct(agg);
-    return `<div class="pres-tile" data-branch-idx="${i}">
-      <div class="t-ring" style="background:${presPctBg(pct)};border:2px solid ${presPctColor(pct)};color:#0f172a">${pct}%</div>
-      <div class="t-name">${presEsc(b.branchName)}</div>
-      <div class="t-sub">${(b.staff||[]).filter(s=>s.name.toUpperCase()!=="TOTAL").length} staff</div>
-    </div>`;
-  }).join("");
-  presShowScreen("branch");
-}
-
-// Event delegation — bound ONCE to the container, never to the tiles
-// themselves, so re-rendering innerHTML never loses the listener and
-// there's no inline-onclick string to accidentally break on quotes.
-document.getElementById("branchGrid").addEventListener("click", e => {
-  const tile = e.target.closest(".pres-tile");
-  if (!tile) return;
-  const b = allData[Number(tile.dataset.branchIdx)];
-  if (b) presSelectBranch(b.branchName);
-});
-
-function presEsc(s) {
-  return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-}
-
-function presSelectBranch(name) {
-  presState.branchName = name;
-  presState.branchMode = "period"; // reset each time a new branch is opened
-  if (!presState.months.size) presState.months = new Set([presCurrentMonth()]);
-  presRenderMonthChips();
-  presShowScreen("month");
-}
-
-/* ═══════════════ SCREEN 2 — MONTH PICKER ═══════════════ */
-function presCurrentMonth() {
-  const m = new Date().toLocaleString('en-US', { month: 'short' });
-  return MONTHS.includes(m) ? m : MONTHS[MONTHS.length - 1];
-}
-function presCurrentOrDefaultMonths() { return presState.months.size ? [...presState.months] : [presCurrentMonth()]; }
-
-function presRenderMonthChips() {
-  document.getElementById("monthTitle").textContent = "Select Month — " + presState.branchName;
-  const row = document.getElementById("monthChips");
-  row.innerHTML = MONTHS.map(m =>
-    `<span class="pres-chip ${presState.months.has(m)?"on":""}" onclick="presToggleMonth('${m}')">${m}</span>`
-  ).join("");
-}
-function presToggleMonth(m) {
-  if (presState.months.has(m)) { if (presState.months.size > 1) presState.months.delete(m); }
-  else presState.months.add(m);
-  presRenderMonthChips();
-}
-function presQuickRange(kind) {
-  const cur = presCurrentMonth();
-  const idx = MONTHS.indexOf(cur);
-  presState.months = kind === "ytd" ? new Set(MONTHS.slice(0, idx + 1)) : new Set([cur]);
-  presRenderMonthChips();
-}
-
-// Shared by both the branch Product Performance grid and the staff detail
-// screen — same markup/classes so the two always look identical.
-function presProdCardHTML(k, ach, tgt, outstanding, due) {
-  const pct = tgt > 0 ? Math.round(ach / tgt * 100) : 100;
-  const gap = ach - tgt;
-  const color = PROD_COLOR[k] || "#2d5fd0";
-  const outRow = outstanding ? `<div class="pp-extra">📦 Outstanding: <b>${fmtFull(outstanding.amount,k)}</b>${outstanding.count?` <span class="pp-extra-n">(${outstanding.count} a/c)</span>`:""}</div>` : "";
-  const dueRow = due ? `<div class="pp-extra pp-due">⏰ Due: <b>${fmtFull(due.amount,k)}</b>${due.count?` <span class="pp-extra-n">(${due.count} a/c)</span>`:""}</div>` : "";
-  return `<div class="pres-prod-card">
-    <div class="pp-head">
-      <span class="pp-dot" style="background:${color}"></span>
-      <span class="pp-label">${PLABEL[k]||k}</span>
-      <span class="pp-pct-badge" style="color:#0f172a">${pct}%</span>
-    </div>
-    <div class="pp-track"><div class="pp-fill" style="width:${Math.min(pct,100)}%;background:${color}"></div></div>
-    <div class="pp-figs">
-      <div class="pp-fig"><span class="pp-fig-line"><span class="pp-fig-dot filled" style="background:${color}"></span>Achievement</span><b>${fmtFull(ach,k)}</b></div>
-      <div class="pp-fig"><span class="pp-fig-line"><span class="pp-fig-dot hollow" style="border-color:${color}"></span>Target</span><b>${fmtFull(tgt,k)}</b></div>
-    </div>
-    <div class="pp-gap ${gap<0?'short':'excess'}">${gap<0?'Shortfall':'Excess'} <b>${gap>=0?'+':''}${fmtFull(gap,k)}</b></div>
-    ${outRow}
-    ${dueRow}
-  </div>`;
-}
-
-/* ═══════════════ SCREEN 3 — BRANCH DASHBOARD ═══════════════ */
-function presShowDashboard() {
-  const b = allData.find(x => x.branchName === presState.branchName);
-  if (!b) return;
-  const months = [...presState.months].sort((a,b2)=>MONTHS.indexOf(a)-MONTHS.indexOf(b2));
-  const lastMonth = months[months.length - 1];
-  const ytdMonths = MONTHS.slice(0, MONTHS.indexOf(lastMonth) + 1);
-
-  const agg    = presAggregateBranch(b, months);
-  const aggYtd = presAggregateBranch(b, ytdMonths);
-  const extra    = presAggregateExtra(agg.staff);
-  const extraYtd = presAggregateExtra(aggYtd.staff);
-
-  // stashed so presRenderProductGrid()/the period-YTD toggle can re-render
-  // the Product Performance cards without recomputing everything above.
-  presState.dash = { agg, aggYtd, extra, extraYtd, lastMonth, months };
-
-  document.getElementById("dashTitle").textContent = "🏢 " + b.branchName + " — " + months.join("+");
-
-  document.getElementById("branchModeToggle").innerHTML = `
-    <span class="pres-chip ${presState.branchMode!=="ytd"?"on":""}" data-branch-mode="period">This Period</span>
-    <span class="pres-chip ${presState.branchMode==="ytd"?"on":""}" data-branch-mode="ytd">YTD (Apr–${lastMonth})</span>`;
-
-  presRenderProductGrid();
-
-  document.getElementById("dashStaffGrid").innerHTML = agg.staff.map((s, i) => {
-    const spct = presStaffOverallPct(s, months);
-    return `<div class="pres-staff-chip" data-staff-idx="${i}">
-      <span class="c-ring" style="background:${presPctBg(spct)};border:1.5px solid ${presPctColor(spct)}">${spct}%</span>
-      <span class="c-name">${presEsc(s.name)}</span>
-    </div>`;
-  }).join("");
-  presState.currentStaffList = agg.staff; // for the delegated click handler below
-
-  presState.staffName = null;
-  presShowScreen("dash");
-}
-
-function presSetBranchMode(mode) {
-  presState.branchMode = mode;
-  document.querySelectorAll('#branchModeToggle [data-branch-mode]').forEach(chip => {
-    chip.classList.toggle("on", chip.dataset.branchMode === mode);
-  });
-  presRenderProductGrid();
-}
-
-function presRenderProductGrid() {
-  const d = presState.dash;
-  if (!d) return;
-  const isYtd = presState.branchMode === "ytd";
-  const totals = isYtd ? d.aggYtd.totals : d.agg.totals;
-  const extra  = isYtd ? d.extraYtd : d.extra;
-
-  document.getElementById("dashProducts").innerHTML = `
-    <div class="pres-legend">
-      <span><span class="leg-dot filled"></span> Achievement</span>
-      <span><span class="leg-dot hollow"></span> Target</span>
-    </div>
-    <div class="pres-prod-grid">
-    ${Object.keys(totals).map(k => {
-      const t = totals[k];
-      const out = extra.outstanding[k] || null;
-      const due = (k === "RD" && extra.rdDueAmount) ? { amount: extra.rdDueAmount, count: extra.rdDueCount } : null;
-      return presProdCardHTML(k, t.ach, t.tgt, out, due);
-    }).join("")}
-    </div>`;
-}
-
-document.getElementById("branchModeToggle").addEventListener("click", e => {
-  const chip = e.target.closest("[data-branch-mode]");
-  if (chip) presSetBranchMode(chip.dataset.branchMode);
-});
-
-document.getElementById("dashStaffGrid").addEventListener("click", e => {
-  const tile = e.target.closest(".pres-staff-chip");
-  if (!tile) return;
-  const list = presState.currentStaffList || [];
-  const s = list[Number(tile.dataset.staffIdx)];
-  if (s) presSelectStaff(s.name);
-});
-
-/* ═══════════════ SCREEN 4 — STAFF DETAIL ═══════════════ */
-function presSelectStaff(name) {
-  presState.staffName = name;
-  presState.staffMode = "period"; // reset each time a new staff is opened
-  presRenderStaffCards();
-  presShowScreen("staff");
-}
-
-function presSetStaffMode(mode) {
-  presState.staffMode = mode;
-  presRenderStaffCards();
-}
-
-function presRenderStaffCards() {
-  const b = allData.find(x => x.branchName === presState.branchName);
-  const s = (b.staff || []).find(x => x.name === presState.staffName);
-  if (!s) return;
-
-  const periodMonths = [...presState.months].sort((a,b2)=>MONTHS.indexOf(a)-MONTHS.indexOf(b2));
-  const lastMonth    = periodMonths[periodMonths.length - 1];
-  const ytdMonths    = MONTHS.slice(0, MONTHS.indexOf(lastMonth) + 1);
-  const isYtd        = presState.staffMode === "ytd";
-  const months       = isYtd ? ytdMonths : periodMonths;
-  const periodLabel  = isYtd ? ("Apr–" + lastMonth + " (YTD)") : periodMonths.join("+");
-
-  const svc = presServiceStr(s.doj);
-  document.getElementById("staffAvatar").textContent = initials(s.name);
-  document.getElementById("staffName").textContent = s.name;
-  document.getElementById("staffSub").textContent =
-    presState.branchName + " · " + periodLabel + (svc ? " · " + svc + " service" : "");
-
-  document.getElementById("staffModeToggle").innerHTML = `
-    <span class="pres-chip ${!isYtd?"on":""}" data-staff-mode="period">This Period</span>
-    <span class="pres-chip ${isYtd?"on":""}" data-staff-mode="ytd">YTD (Apr–${lastMonth})</span>`;
-
-  document.getElementById("staffCards").innerHTML = `
-    <div class="pres-legend">
-      <span><span class="leg-dot filled"></span> Achievement</span>
-      <span><span class="leg-dot hollow"></span> Target</span>
-    </div>
-    <div class="pres-prod-grid">
-    ${Object.keys(s.metrics).map(k => {
-      const metric = s.metrics[k];
-      const r = calc(metric, months, s.doj); // { ach, tgt, pct, gap } — reuses script.js's own calc()
-      const out = (OUT_CFG[k] && metric.outstanding) ? { amount: metric.outstanding, count: metric.outstandingCount } : null;
-      const due = (k === "RD" && metric.dueAmount) ? { amount: metric.dueAmount, count: metric.dueCount } : null;
-      return presProdCardHTML(k, r.ach, r.tgt, out, due);
-    }).join("") || `<div class="pres-empty">No product data for this staff member.</div>`}
-    </div>`;
-
-  presRenderStaffSwitchStrip(b);
-}
-
-// Tiny sticky strip of every other staff member in this branch, so switching
-// doesn't require going back to the dashboard. Reuses presState.currentStaffList
-// (set by presShowDashboard) when available, falling back to a fresh filter.
-function presRenderStaffSwitchStrip(b) {
-  const list = (presState.currentStaffList && presState.currentStaffList.length)
-    ? presState.currentStaffList
-    : (b.staff || []).filter(x => x.name.toUpperCase() !== "TOTAL");
-  document.getElementById("staffSwitchStrip").innerHTML = list.map(st => `
-    <span class="pres-staffswitch-chip ${st.name === presState.staffName ? "on" : ""}" data-switch-name="${presEsc(st.name)}">${presEsc(st.name)}</span>
-  `).join("");
-}
-
-document.getElementById("staffModeToggle").addEventListener("click", e => {
-  const chip = e.target.closest("[data-staff-mode]");
-  if (chip) presSetStaffMode(chip.dataset.staffMode);
-});
-
-document.getElementById("staffSwitchStrip").addEventListener("click", e => {
-  const chip = e.target.closest("[data-switch-name]");
-  if (chip && chip.dataset.switchName !== presState.staffName) presSelectStaff(chip.dataset.switchName);
-});
-
-/* ═══════════════ SHARED AGGREGATION (mirrors renderSnap's math in script.js,
-   so figures on this screen always match the main dashboard) ═══════════════ */
-function presAggregateBranch(b, months) {
-  const staff = (b.staff || []).filter(s => s.name.toUpperCase() !== "TOTAL");
-  const totals = {};
-  staff.forEach(s => {
-    for (const k in s.metrics) {
-      if (!totals[k]) totals[k] = { tgt: 0, ach: 0 };
-      const metric = s.metrics[k];
-      months.forEach(m => totals[k].ach += (metric.monthlyAchievement[m] || 0));
-      if (k !== "BusinessLoan") totals[k].tgt += (metric.monthlyTarget || 0) * getEffectiveMonths(s.doj, months).length;
+    .pres-topbar {
+      flex: 0 0 auto;
+      display: flex; align-items: center; gap: 14px;
+      padding: clamp(8px,1.4vh,16px) clamp(14px,2.4vw,32px);
+      background: #cfe0fa;
+      border-bottom: 1px solid #9db8e6;
     }
-  });
-  if (totals["BusinessLoan"]) {
-    const blMonthly = b.blBranchMonthlyTarget || 0;
-    const blAnnual  = b.blBranchTotalTarget || 0;
-    totals["BusinessLoan"].tgt = blAnnual > 0 ? blAnnual : (blMonthly * months.length);
-  }
-  if (totals["GoldLoan"] && b.glBranchMonthlyTarget) {
-    totals["GoldLoan"].tgt = b.glBranchMonthlyTarget * months.length;
-  }
-
-  let onTgt = 0;
-  staff.forEach(s => {
-    let sa = 0, st = 0;
-    for (const k in s.metrics) {
-      if (k === "BusinessLoan") continue;
-      const metric = s.metrics[k];
-      months.forEach(m => sa += (metric.monthlyAchievement[m] || 0));
-      st += (metric.monthlyTarget || 0) * getEffectiveMonths(s.doj, months).length;
+    .pres-brand { font-weight: 800; font-size: clamp(14px,1.6vw,20px); letter-spacing: .02em; color: #0f172a; }
+    .pres-crumb { font-size: clamp(11px,1.1vw,14px); color: #1e293b; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pres-btn {
+      border: 1px solid #7c9bd6;
+      background: #f4f8ff;
+      color: #0f172a;
+      text-decoration: none; display: inline-block;
+      padding: clamp(6px,.9vh,10px) clamp(10px,1.4vw,18px);
+      border-radius: 999px;
+      font-size: clamp(11px,1.05vw,14px);
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
     }
-    if (st > 0 && sa >= st) onTgt++;
-  });
+    .pres-btn:hover { background: #ffffff; }
+    .pres-btn.accent { background: #a9c8ff; border-color: #2d5fd0; color: #0f172a; }
+    .pres-btn.accent:hover { background: #bcd5ff; }
 
-  let belowProd = 0;
-  for (const k in totals) {
-    const p = totals[k].tgt > 0 ? Math.round(totals[k].ach / totals[k].tgt * 100) : 100;
-    if (p < 100) belowProd++;
-  }
+    .pres-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: clamp(14px,2.4vh,34px) clamp(16px,3vw,48px); display: flex; flex-direction: column; }
+    .pres-screen { flex: 1 1 auto; min-height: 0; display: none; flex-direction: column; }
+    .pres-screen.on { display: flex; }
 
-  return { totals, staff, staffCount: staff.length, onTgt, belowProd };
-}
+    .pres-h1 { font-size: clamp(20px,3vw,40px); font-weight: 800; color: #0f172a; margin-bottom: clamp(4px,1vh,10px); }
+    .pres-sub { font-size: clamp(11px,1.2vw,16px); color: #334155; margin-bottom: clamp(14px,2.6vh,32px); }
 
-function presOverallPct(agg) {
-  let ach = 0, tgt = 0;
-  for (const k in agg.totals) { ach += agg.totals[k].ach; tgt += agg.totals[k].tgt; }
-  return tgt > 0 ? Math.round(ach / tgt * 100) : 100;
-}
-
-function presStaffOverallPct(s, months) {
-  let ach = 0, tgt = 0;
-  for (const k in s.metrics) {
-    if (k === "BusinessLoan") continue;
-    const metric = s.metrics[k];
-    months.forEach(m => ach += (metric.monthlyAchievement[m] || 0));
-    tgt += (metric.monthlyTarget || 0) * getEffectiveMonths(s.doj, months).length;
-  }
-  return tgt > 0 ? Math.round(ach / tgt * 100) : 100;
-}
-
-function presAggregateExtra(staffList) {
-  const outstanding = {}; // key -> { amount, count } — only for products OUT_CFG covers (Investment, GoldLoan, RD)
-  let rdDueAmount = 0, rdDueCount = 0;
-  staffList.forEach(s => {
-    for (const k in s.metrics) {
-      const m = s.metrics[k];
-      if (OUT_CFG[k] && m.outstanding) {
-        if (!outstanding[k]) outstanding[k] = { amount: 0, count: 0 };
-        outstanding[k].amount += m.outstanding || 0;
-        outstanding[k].count  += m.outstandingCount || 0;
-      }
+    /* ── Branch tile grid — click to pick, scrolls internally if it overflows
+       (data must never be clipped/inaccessible — see pres-grid below) ── */
+    .pres-grid {
+      flex: 1 1 auto; min-height: 0;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(clamp(120px,15vw,220px), 1fr));
+      grid-auto-rows: min-content;
+      align-content: start;
+      gap: clamp(8px,1.4vw,18px);
+      overflow-y: auto;
     }
-    const rd = s.metrics["RD"];
-    if (rd && rd.dueAmount) { rdDueAmount += rd.dueAmount; rdDueCount += rd.dueCount || 0; }
-  });
-  return { outstanding, rdDueAmount, rdDueCount };
-}
+    .pres-tile {
+      background: #ffffff;
+      border: 1px solid #b4c9ee;
+      box-shadow: 0 1px 3px rgba(30,58,138,.10);
+      color: #0f172a;
+      border-radius: 16px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: clamp(4px,.8vh,10px);
+      cursor: pointer;
+      transition: transform .12s, background .12s;
+      text-align: center;
+      padding: 8px;
+    }
+    .pres-tile:hover { background: #e3eeff; border-color: #2d5fd0; transform: translateY(-2px); }
+    .pres-tile .t-icon { font-size: clamp(20px,2.6vw,34px); }
+    .pres-tile .t-name { font-size: clamp(11px,1.15vw,16px); font-weight: 700; line-height: 1.25; }
+    .pres-tile .t-sub { font-size: clamp(9px,.95vw,12px); color: #334155; }
+    .pres-tile .t-ring { width: clamp(38px,4.2vw,58px); height: clamp(38px,4.2vw,58px); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: clamp(10px,1.05vw,14px); color: #0f172a; }
 
-// Service duration from DOJ ("DD-MMM-YYYY"), reuses script.js's own parseDOJDate.
-function presServiceStr(dojStr) {
-  const d = parseDOJDate(dojStr);
-  if (!d) return null;
-  const now = new Date();
-  let months = (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
-  if (now.getDate() < d.getDate()) months--;
-  if (months < 0) months = 0;
-  const yrs = Math.floor(months / 12), mos = months % 12;
-  if (yrs === 0) return mos + (mos === 1 ? " mo" : " mos");
-  if (mos === 0) return yrs + (yrs === 1 ? " yr" : " yrs");
-  return yrs + (yrs === 1 ? " yr " : " yrs ") + mos + (mos === 1 ? " mo" : " mos");
-}
+    /* ── Month chips ── */
+    .pres-chiprow { display: flex; flex-wrap: wrap; gap: clamp(6px,1vw,12px); margin-bottom: clamp(14px,2.4vh,28px); }
+    .pres-chip {
+      padding: clamp(8px,1.2vh,14px) clamp(14px,1.8vw,22px);
+      border-radius: 999px;
+      background: #f4f8ff;
+      border: 1px solid #7c9bd6;
+      color: #0f172a;
+      font-weight: 700;
+      font-size: clamp(12px,1.2vw,16px);
+      cursor: pointer;
+    }
+    .pres-chip:hover { background: #ffffff; }
+    .pres-chip.on { background: #a9c8ff; border-color: #2d5fd0; color: #0f172a; }
+    .pres-chip.quick { background: #c9f0d6; border-color: #2e9e5b; color: #0f172a; }
 
-function presPctColor(p) { return p >= 100 ? "#16a34a" : p >= 75 ? "#d97706" : "#dc2626"; }  // border/accent only, never text
-function presPctBg(p)    { return p >= 100 ? "#bbf7d0" : p >= 75 ? "#fde68a" : "#fecaca"; }  // light tint, dark text on top
+    /* (Shortfall/Excess KPI cards removed — the per-product cards below
+       already show Target and Gap, which was redundant with these.) ── */
+    /* ── Product performance — the dominant element on this screen.
+       ₹ figures are the largest text here on purpose; % is a small badge.
+       No internal scroll here on purpose — this section grows with its
+       content and the page (.pres-body) scrolls naturally. ── */
+    .pres-products { flex: 0 0 auto; display: flex; flex-direction: column; gap: clamp(4px,1vh,10px); }
+    .pres-products-head { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+    .pres-legend { display: flex; gap: clamp(12px,1.6vw,22px); font-size: clamp(10px,1vw,13px); color: #1e293b; font-weight: 600; margin-bottom: 2px; flex: 0 0 auto; }
+    .pres-legend .leg-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+    .pres-legend .leg-dot.filled { background: #334155; }
+    .pres-legend .leg-dot.hollow { border: 2px solid #334155; background: transparent; }
+
+    .pres-prod-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(clamp(210px,24vw,320px),1fr));
+      grid-auto-rows: min-content;
+      align-content: start;
+      gap: clamp(8px,1.2vw,16px);
+    }
+    .pres-prod-card {
+      background: #ffffff; border: 1px solid #b4c9ee; box-shadow: 0 1px 3px rgba(30,58,138,.10); color: #0f172a; border-radius: 14px;
+      padding: clamp(10px,1.5vh,18px) clamp(12px,1.5vw,20px);
+      display: flex; flex-direction: column; gap: clamp(4px,.8vh,9px);
+    }
+    .pp-head { display: flex; align-items: center; gap: 7px; }
+    .pp-dot { width: clamp(9px,1vw,13px); height: clamp(9px,1vw,13px); border-radius: 50%; flex: 0 0 auto; }
+    .pp-label { font-size: clamp(12px,1.15vw,16px); font-weight: 800; flex: 1; }
+    .pp-pct-badge { font-size: clamp(10px,1vw,13px); font-weight: 800; padding: 2px 9px; border-radius: 999px; background: #eef3fd; border: 1px solid #c3d3ee; }
+    .pp-track { height: clamp(7px,1vh,11px); background: #dde6f5; border-radius: 999px; overflow: hidden; }
+    .pp-fill { height: 100%; border-radius: 999px; }
+    .pp-figs { display: flex; gap: 10px; }
+    .pp-fig { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: clamp(10px,.95vw,13px); color: #1e293b; font-weight: 600; }
+    .pp-fig-line { display: flex; align-items: center; gap: 6px; }
+    .pp-fig b { color: #0f172a; font-weight: 800; font-size: clamp(14px,1.5vw,20px); overflow-wrap: break-word; }
+    .pp-fig-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; display: inline-block; }
+    .pp-fig-dot.hollow { background: transparent; border: 2px solid; }
+    .pp-gap { display: flex; align-items: baseline; gap: 7px; font-size: clamp(10px,.95vw,13px); font-weight: 700; padding-top: 2px; border-top: 1px dashed #9db8e6; }
+    .pp-gap b { margin-left: auto; font-size: clamp(14px,1.5vw,20px); font-weight: 800; }
+    .pp-gap.short { color: #991b1b; }
+    .pp-gap.excess { color: #166534; }
+    .pp-extra { font-size: clamp(10px,.95vw,13px); color: #0f172a; background: #eaf1ff; border: 1px solid #c3d3ee; border-radius: 8px; padding: 4px 9px; }
+    .pp-extra.pp-due { color: #0f172a; background: #fef3c7; border-color: #f2d27a; }
+    .pp-extra b { color: #0f172a; font-size: clamp(12px,1.1vw,15px); }
+    .pp-extra-n { color: #334155; }
+
+    /* ── Compact staff strip — deliberately small; the point is quick access
+       to a name, not a data display (that's the point of the tap-through). ── */
+    .pres-staffstrip { flex: 0 0 auto; max-height: clamp(64px,11vh,96px); overflow-y: auto; display: flex; flex-wrap: wrap; gap: clamp(5px,.7vw,8px); align-content: flex-start; }
+    .pres-staff-chip {
+      display: flex; align-items: center; gap: 6px;
+      background: #ffffff; border: 1px solid #9db8e6; color: #0f172a;
+      border-radius: 999px; padding: 3px 12px 3px 3px; cursor: pointer;
+    }
+    .pres-staff-chip:hover { background: #e3eeff; border-color: #2d5fd0; }
+    .pres-staff-chip .c-ring {
+      width: clamp(20px,1.9vw,26px); height: clamp(20px,1.9vw,26px); border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: clamp(8.5px,.8vw,11px); font-weight: 800; color: #0f172a; flex: 0 0 auto;
+    }
+    .pres-staff-chip .c-name { font-size: clamp(10.5px,1vw,13px); font-weight: 700; white-space: nowrap; }
+
+    /* ── Staff detail screen ── */
+    .pres-staffhead { display: flex; align-items: center; gap: clamp(10px,1.6vw,22px); margin-bottom: clamp(10px,1.8vh,20px); flex: 0 0 auto; flex-wrap: wrap; }
+    .pres-avatar { width: clamp(48px,6vw,84px); height: clamp(48px,6vw,84px); border-radius: 50%; background: #a9c8ff; border: 2px solid #2d5fd0; color: #0f172a; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: clamp(16px,2vw,30px); flex: 0 0 auto; }
+
+    /* ── Staff switcher — sticks to the bottom of the viewport while
+       scrolling the product cards above, so another staff member is one
+       tap away without leaving the screen. Deliberately tiny (name only,
+       no data) so it never competes with the cards for attention. ── */
+    .pres-staffswitch {
+      position: sticky; bottom: 0; z-index: 5;
+      margin: clamp(12px,2vh,20px) calc(-1 * clamp(16px,3vw,48px)) calc(-1 * clamp(14px,2.4vh,34px));
+      padding: clamp(8px,1.2vh,12px) clamp(16px,3vw,48px) clamp(10px,1.6vh,16px);
+      background: linear-gradient(180deg, rgba(219,232,251,0) 0%, #dbe8fb 28%, #dbe8fb 100%);
+      display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 6px;
+    }
+    .pres-staffswitch-chip {
+      flex: 0 0 auto;
+      padding: 4px 11px;
+      border-radius: 999px;
+      background: #ffffff; border: 1px solid #9db8e6;
+      font-size: clamp(9.5px,.85vw,11.5px); font-weight: 700;
+      color: #0f172a; white-space: nowrap; cursor: pointer;
+    }
+    .pres-staffswitch-chip:hover { background: #e3eeff; border-color: #2d5fd0; }
+    .pres-staffswitch-chip.on { background: #a9c8ff; border-color: #2d5fd0; color: #0f172a; }
+    /* Staff product cards reuse the exact same .pres-prod-card / pp-* styles
+       as the branch dashboard (see above) — same markup, same look. */
+
+    .pres-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: #1e293b; font-size: clamp(13px,1.4vw,18px); }
+    .pres-fullscreen-hint { position: fixed; bottom: 10px; right: 14px; font-size: 11px; color: #334155; }
+
+    @media (max-width: 640px) {
+      .pres-topbar { flex-wrap: wrap; }
+      .pres-crumb { order: 3; flex-basis: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════
+     HIDDEN DATA SHELL — exact markup script.js expects (same
+     IDs as index.html). Never shown. script.js is loaded here
+     UNMODIFIED purely as the data-loading layer; its own legacy
+     rendering into this shell is harmless because it's hidden.
+     ══════════════════════════════════════════════════════════ -->
+<div style="display:none" aria-hidden="true">
+
+  <div class="topbar">
+    <h1>Branch Review Dashboard</h1>
+    <button class="tb-hamburger" id="tbHamburger" onclick="toggleTopbarMenu()" aria-label="Menu">☰</button>
+    <div class="topbar-controls" id="topbarControls">
+      <a class='nav-link' href='/staff_dashboard'>Staff Productivity</a>
+      <span id="adminReportLink" style="display:none">
+        <a class='nav-link admin-link' href='/admin_report'>📋 Admin Report</a>
+        <a href="#" onclick="openSNLReview();return false;" class="nav-link admin-link">🏢 SNL Review</a>
+      </span>
+      <select id="branchSel" onchange="onBranch();closeTopbarMenu()" style="display:none"></select>
+      <select id="modeSel" onchange="onMode();closeTopbarMenu()">
+        <option value="all">All staff</option>
+        <option value="single">Individual</option>
+      </select>
+      <select id="staffSel" style="display:none" onchange="render();closeTopbarMenu()"></select>
+      <span id="userInfo"></span>
+      <button class="tb-btn" onclick="openProfilePicker();closeTopbarMenu()">👤 Employee Profile</button>
+      <button class="tb-btn" id="reviewChecklistBtn" style="display:none" onclick="openReviewChecklist();closeTopbarMenu()">📝 Review Checklist</button>
+      <button class="tb-btn" onclick="doExport();closeTopbarMenu()">↓ Export</button>
+      <button class="tb-btn danger" onclick="doLogout()">Logout</button>
+    </div>
+  </div>
+
+  <div class="main" id="mainArea">
+    <div class="spinner" id="loader">⏳ Connecting to Google Sheets…</div>
+  </div>
+
+  <div class="overlay" id="overlay" onclick="maybeClose(event)">
+    <div class="modal" id="modal">
+      <div class="modal-head">
+        <h3 id="modalTitle">Details</h3>
+        <button class="mclose" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="profOverlay" onclick="maybeCloseProfile(event)">
+    <div class="modal modal-full" id="profModal">
+      <div class="modal-head">
+        <h3 id="profModalTitle">Employee Profile</h3>
+        <button class="mclose" onclick="closeProfileModal()">×</button>
+      </div>
+      <div class="modal-body" id="profModalBody"></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="checklistOverlay" onclick="maybeCloseChecklist(event)">
+    <div class="modal" id="checklistModal">
+      <div class="modal-head">
+        <h3 id="checklistModalTitle">📝 Review Checklist</h3>
+        <button class="mclose" onclick="closeReviewChecklist()">×</button>
+      </div>
+      <div class="modal-body" id="checklistModalBody"></div>
+    </div>
+  </div>
+
+</div>
+<!-- ══════════════════ END HIDDEN DATA SHELL ══════════════════ -->
+
+
+<!-- ══════════════════ VISIBLE PRESENTATION UI ══════════════════ -->
+<div id="presWrap">
+  <div class="pres-topbar">
+    <span class="pres-brand">📊 Branch Review — Presentation</span>
+    <span class="pres-crumb" id="presCrumb">Loading…</span>
+    <button class="pres-btn" id="presFsBtn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+    <button class="pres-btn" id="presBackBtn" style="display:none" onclick="presGoBack()">◂ Back</button>
+    <a class="pres-btn" href="index.html">✕ Exit</a>
+  </div>
+
+  <div class="pres-body">
+
+    <!-- Screen 1 — pick branch -->
+    <div class="pres-screen on" id="scr-branch">
+      <div class="pres-h1">Select Branch</div>
+      <div class="pres-sub">Tap a branch to review</div>
+      <div class="pres-grid" id="branchGrid"></div>
+    </div>
+
+    <!-- Screen 2 — pick month(s) -->
+    <div class="pres-screen" id="scr-month">
+      <div class="pres-h1" id="monthTitle">Select Month</div>
+      <div class="pres-sub">Tap one month, or use a quick range</div>
+      <div class="pres-chiprow" id="monthChips"></div>
+      <div class="pres-chiprow">
+        <span class="pres-chip quick" onclick="presQuickRange('ytd')">📈 Full Year (Apr–now)</span>
+        <span class="pres-chip quick" onclick="presQuickRange('current')">📅 Current Month</span>
+      </div>
+      <div style="margin-top:auto">
+        <button class="pres-btn accent" style="font-size:clamp(13px,1.4vw,18px);padding:14px 30px" onclick="presShowDashboard()">View Dashboard ▸</button>
+      </div>
+    </div>
+
+    <!-- Screen 3 — branch dashboard -->
+    <div class="pres-screen" id="scr-dash">
+      <div class="pres-h1" id="dashTitle">—</div>
+      <div class="pres-products-head" style="margin-bottom:6px">
+        <div class="pres-sub" style="margin-bottom:0">Product Performance</div>
+        <div class="pres-chiprow" id="branchModeToggle" style="margin-left:auto;margin-bottom:0"></div>
+      </div>
+      <div class="pres-products" id="dashProducts"></div>
+      <div class="pres-sub" style="margin:8px 0 4px;flex:0 0 auto">Staff — tap for full detail</div>
+      <div class="pres-staffstrip" id="dashStaffGrid"></div>
+    </div>
+
+    <!-- Screen 4 — staff detail -->
+    <div class="pres-screen" id="scr-staff">
+      <div class="pres-staffhead">
+        <div class="pres-avatar" id="staffAvatar">--</div>
+        <div>
+          <div class="pres-h1" id="staffName" style="margin-bottom:2px">—</div>
+          <div class="pres-sub" id="staffSub" style="margin-bottom:0">—</div>
+        </div>
+        <div class="pres-chiprow" id="staffModeToggle" style="margin-left:auto;margin-bottom:0"></div>
+      </div>
+      <div class="pres-products" id="staffCards"></div>
+      <div class="pres-staffswitch" id="staffSwitchStrip"></div>
+    </div>
+
+  </div>
+</div>
+
+<script src="script.js"></script>
+<script src="presentation.js"></script>
+
+</body>
+</html>
