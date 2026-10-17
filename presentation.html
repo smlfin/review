@@ -332,6 +332,9 @@
     .pp-extra.pp-inflow { color: #065f46; background: #ecfdf5; border-color: #6ee7b7; }
     .pp-extra b   { color: #0f172a; font-size: clamp(13px,1.2vw,17px); }
     .pp-extra-n   { color: #475569; }
+    /* Outstanding + Due on one line — each takes half the width */
+    .pp-extra-row { display: flex; gap: 6px; }
+    .pp-extra-half { flex: 1 1 0; min-width: 0; }
 
     /* ══════════════════════════════════════════════════════════
        DASHBOARD TOP STRIP — staff chips LEFT, legend pills RIGHT
