@@ -1,16 +1,20 @@
-// PRESENTATION MODE (standalone; does not modify script.js).
-// Reads script.js globals (allData, MONTHS, PLABEL, PROD_COLOR, getEffectiveMonths,
-// calc, fmt, fmtFull, initials) once load() has populated allData.
+/* ══════════════════════════════════════════════════════════
+   PRESENTATION MODE  —  v3 (light theme, side-by-side Monthly + YTD)
+   Reads script.js globals: allData, MONTHS, PLABEL,
+   PROD_COLOR, OUT_CFG, getEffectiveMonths, calc, fmt,
+   fmtFull, initials, parseDOJDate, SESSION_NAME,
+   SESSION_ROLE, SESSION_BRANCH.
+   No toggle switch needed — both views appear together.
+   ══════════════════════════════════════════════════════════ */
 
 const presState = {
-  screen: "branch",      // branch | month | dash | staff
+  screen: "branch",
   branchName: null,
-  months: new Set(),     // subset of MONTHS
-  staffName: null,
-  branchMode: "period"   // period | ytd — toggles the Product Performance cards
+  months: new Set(),
+  staffName: null
 };
 
-/* ── wait for script.js's own load() to finish populating allData ── */
+/* ── wait for script.js's own load() to finish ── */
 (function waitForData() {
   const iv = setInterval(() => {
     if (typeof allData !== "undefined" && Array.isArray(allData) && allData.length) {
@@ -21,10 +25,9 @@ const presState = {
 })();
 
 function presInit() {
-  document.getElementById("presCrumb").textContent = SESSION_NAME + " · " + (SESSION_ROLE === "admin" ? "All Branches" : SESSION_BRANCH);
+  document.getElementById("presCrumb").textContent =
+    SESSION_NAME + " · " + (SESSION_ROLE === "admin" ? "All Branches" : SESSION_BRANCH);
 
-  // Non-admin sessions only ever have their own branch in allData (already
-  // filtered by script.js's load()) — skip straight past branch-picking.
   if (SESSION_ROLE !== "admin" && allData.length === 1) {
     presSelectBranch(allData[0].branchName);
     return;
@@ -44,16 +47,19 @@ function presShowScreen(name) {
 function presUpdateCrumb() {
   const parts = [SESSION_NAME];
   if (presState.branchName) parts.push(presState.branchName);
-  if (presState.months.size) parts.push([...presState.months].sort((a,b)=>MONTHS.indexOf(a)-MONTHS.indexOf(b)).join("+"));
+  if (presState.months.size) {
+    const sorted = [...presState.months].sort((a,b)=>MONTHS.indexOf(a)-MONTHS.indexOf(b));
+    parts.push(presPeriodLabel(sorted));
+  }
   if (presState.staffName) parts.push(presState.staffName);
   document.getElementById("presCrumb").textContent = parts.join(" · ");
 }
 
 function presGoBack() {
-  if (presState.screen === "staff") { presShowScreen("dash"); return; }
-  if (presState.screen === "dash")  { presShowScreen("month"); return; }
+  if (presState.screen === "staff")  { presShowScreen("dash");   return; }
+  if (presState.screen === "dash")   { presShowScreen("month");  return; }
   if (presState.screen === "month") {
-    if (SESSION_ROLE !== "admin") return; // no branch step to go back to
+    if (SESSION_ROLE !== "admin") return;
     presState.branchName = null;
     presShowScreen("branch");
     return;
@@ -69,10 +75,10 @@ function toggleFullscreen() {
 function presRenderBranchGrid() {
   const grid = document.getElementById("branchGrid");
   grid.innerHTML = allData.map((b, i) => {
-    const agg = presAggregateBranch(b, presCurrentOrDefaultMonths());
-    const pct = presOverallPct(agg);
+    const agg  = presAggregateBranch(b, presCurrentOrDefaultMonths());
+    const pct  = presOverallPct(agg);
     return `<div class="pres-tile" data-branch-idx="${i}">
-      <div class="t-ring" style="background:${presPctBg(pct)};border:2px solid ${presPctColor(pct)};color:#0f172a">${pct}%</div>
+      <div class="t-ring" style="background:${presPctBg(pct)};color:#fff">${pct}%</div>
       <div class="t-name">${presEsc(b.branchName)}</div>
       <div class="t-sub">${(b.staff||[]).filter(s=>s.name.toUpperCase()!=="TOTAL").length} staff</div>
     </div>`;
@@ -80,9 +86,6 @@ function presRenderBranchGrid() {
   presShowScreen("branch");
 }
 
-// Event delegation — bound ONCE to the container, never to the tiles
-// themselves, so re-rendering innerHTML never loses the listener and
-// there's no inline-onclick string to accidentally break on quotes.
 document.getElementById("branchGrid").addEventListener("click", e => {
   const tile = e.target.closest(".pres-tile");
   if (!tile) return;
@@ -91,29 +94,53 @@ document.getElementById("branchGrid").addEventListener("click", e => {
 });
 
 function presEsc(s) {
-  return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  return String(s == null ? "" : s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
 function presSelectBranch(name) {
   presState.branchName = name;
-  presState.branchMode = "period"; // reset each time a new branch is opened
   if (!presState.months.size) presState.months = new Set([presCurrentMonth()]);
   presRenderMonthChips();
   presShowScreen("month");
 }
 
 /* ═══════════════ SCREEN 2 — MONTH PICKER ═══════════════ */
+
+/* Map short keys (used internally) → full display names */
+const MONTH_FULL = {
+  Jan:"January", Feb:"February", Mar:"March",    Apr:"April",
+  May:"May",     Jun:"June",     Jul:"July",      Aug:"August",
+  Sep:"September", Oct:"October", Nov:"November", Dec:"December"
+};
+function presFullMonth(m) { return MONTH_FULL[m] || m; }
+
+/* Build a human-readable period label using full month names */
+function presPeriodLabel(months) {
+  if (!months || !months.length) return "";
+  if (months.length === 1) return presFullMonth(months[0]);
+  // contiguous range → "April – September"
+  return presFullMonth(months[0]) + " – " + presFullMonth(months[months.length - 1]);
+}
+/* YTD label: "April – September (YTD)" */
+function presYtdLabel(lastMonth) {
+  return "April – " + presFullMonth(lastMonth) + " (YTD)";
+}
+
 function presCurrentMonth() {
   const m = new Date().toLocaleString('en-US', { month: 'short' });
   return MONTHS.includes(m) ? m : MONTHS[MONTHS.length - 1];
 }
-function presCurrentOrDefaultMonths() { return presState.months.size ? [...presState.months] : [presCurrentMonth()]; }
-
+function presCurrentOrDefaultMonths() {
+  return presState.months.size ? [...presState.months] : [presCurrentMonth()];
+}
 function presRenderMonthChips() {
   document.getElementById("monthTitle").textContent = "Select Month — " + presState.branchName;
   const row = document.getElementById("monthChips");
+  /* Show full month name on each chip */
   row.innerHTML = MONTHS.map(m =>
-    `<span class="pres-chip ${presState.months.has(m)?"on":""}" onclick="presToggleMonth('${m}')">${m}</span>`
+    `<span class="pres-chip ${presState.months.has(m)?"on":""}" onclick="presToggleMonth('${m}')">${presFullMonth(m)}</span>`
   ).join("");
 }
 function presToggleMonth(m) {
@@ -128,28 +155,75 @@ function presQuickRange(kind) {
   presRenderMonthChips();
 }
 
-// Shared by both the branch Product Performance grid and the staff detail
-// screen — same markup/classes so the two always look identical.
-function presProdCardHTML(k, ach, tgt, outstanding, due) {
-  const pct = tgt > 0 ? Math.round(ach / tgt * 100) : 100;
-  const gap = ach - tgt;
-  const color = PROD_COLOR[k] || "#2d5fd0";
-  const outRow = outstanding ? `<div class="pp-extra">📦 Outstanding: <b>${fmtFull(outstanding.amount,k)}</b>${outstanding.count?` <span class="pp-extra-n">(${outstanding.count} a/c)</span>`:""}</div>` : "";
-  const dueRow = due ? `<div class="pp-extra pp-due">⏰ Due: <b>${fmtFull(due.amount,k)}</b>${due.count?` <span class="pp-extra-n">(${due.count} a/c)</span>`:""}</div>` : "";
-  return `<div class="pres-prod-card">
+/* ═══════════════ PRODUCT CARD HTML — DUAL COLUMN ═══════════════
+   Renders one product card that shows BOTH periods side by side.
+   Left col = selected period  |  Right col = YTD
+   ══════════════════════════════════════════════════════════════ */
+function presDualProdCardHTML(k, ach, tgt, achYtd, tgtYtd, outstanding, due, periodLabel, ytdLabel) {
+  const pct    = tgt    > 0 ? Math.round(ach    / tgt    * 100) : 100;
+  const pctYtd = tgtYtd > 0 ? Math.round(achYtd / tgtYtd * 100) : 100;
+  const gap    = ach    - tgt;
+  const gapYtd = achYtd - tgtYtd;
+  const color  = PROD_COLOR[k] || "#2d6bff";
+
+  const outRow = outstanding
+    ? `<div class="pp-extra">📦 Outstanding: <b>${fmtFull(outstanding.amount,k)}</b>${outstanding.count?` <span class="pp-extra-n">(${outstanding.count} a/c)</span>`:""}</div>`
+    : "";
+  const dueRow = due
+    ? `<div class="pp-extra pp-due">⏰ Due: <b>${fmtFull(due.amount,k)}</b>${due.count?` <span class="pp-extra-n">(${due.count} a/c)</span>`:""}</div>`
+    : "";
+
+  return `<div class="pres-prod-card dual-card">
     <div class="pp-head">
       <span class="pp-dot" style="background:${color}"></span>
       <span class="pp-label">${PLABEL[k]||k}</span>
-      <span class="pp-pct-badge" style="color:#0f172a">${pct}%</span>
     </div>
-    <div class="pp-track"><div class="pp-fill" style="width:${Math.min(pct,100)}%;background:${color}"></div></div>
-    <div class="pp-figs">
-      <div class="pp-fig"><span class="pp-fig-line"><span class="pp-fig-dot filled" style="background:${color}"></span>Achievement</span><b>${fmtFull(ach,k)}</b></div>
-      <div class="pp-fig"><span class="pp-fig-line"><span class="pp-fig-dot hollow" style="border-color:${color}"></span>Target</span><b>${fmtFull(tgt,k)}</b></div>
+
+    <div class="dual-cols">
+      <!-- ── LEFT: Selected Period ── -->
+      <div class="dual-col">
+        <div class="dual-col-badge" style="border-color:${color}40;background:${color}12">
+          <span class="dual-col-label">${presEsc(periodLabel)}</span>
+          <span class="pp-pct-badge ${presPctClass(pct)}">${pct}%</span>
+        </div>
+        <div class="pp-track"><div class="pp-fill" style="width:${Math.min(pct,100)}%;background:${color}"></div></div>
+        <div class="dual-fig-row">
+          <div class="dual-fig">
+            <span class="dual-fig-lbl">Achievement</span>
+            <b class="dual-fig-val">${fmtFull(ach,k)}</b>
+          </div>
+          <div class="dual-fig">
+            <span class="dual-fig-lbl">Target</span>
+            <b class="dual-fig-val muted">${fmtFull(tgt,k)}</b>
+          </div>
+        </div>
+        <div class="pp-gap ${gap<0?'short':'excess'}">${gap<0?'▼ Short':'▲ Excess'} <b>${gap>=0?'+':''}${fmtFull(gap,k)}</b></div>
+      </div>
+
+      <div class="dual-divider"></div>
+
+      <!-- ── RIGHT: YTD ── -->
+      <div class="dual-col">
+        <div class="dual-col-badge" style="border-color:#a78bfa50;background:rgba(167,139,250,.08)">
+          <span class="dual-col-label ytd-lbl">${presEsc(ytdLabel)}</span>
+          <span class="pp-pct-badge ${presPctClass(pctYtd)}">${pctYtd}%</span>
+        </div>
+        <div class="pp-track"><div class="pp-fill" style="width:${Math.min(pctYtd,100)}%;background:#7c3aed"></div></div>
+        <div class="dual-fig-row">
+          <div class="dual-fig">
+            <span class="dual-fig-lbl">Achievement</span>
+            <b class="dual-fig-val">${fmtFull(achYtd,k)}</b>
+          </div>
+          <div class="dual-fig">
+            <span class="dual-fig-lbl">Target</span>
+            <b class="dual-fig-val muted">${fmtFull(tgtYtd,k)}</b>
+          </div>
+        </div>
+        <div class="pp-gap ${gapYtd<0?'short':'excess'}">${gapYtd<0?'▼ Short':'▲ Excess'} <b>${gapYtd>=0?'+':''}${fmtFull(gapYtd,k)}</b></div>
+      </div>
     </div>
-    <div class="pp-gap ${gap<0?'short':'excess'}">${gap<0?'Shortfall':'Excess'} <b>${gap>=0?'+':''}${fmtFull(gap,k)}</b></div>
-    ${outRow}
-    ${dueRow}
+
+    ${outRow}${dueRow}
   </div>`;
 }
 
@@ -157,7 +231,8 @@ function presProdCardHTML(k, ach, tgt, outstanding, due) {
 function presShowDashboard() {
   const b = allData.find(x => x.branchName === presState.branchName);
   if (!b) return;
-  const months = [...presState.months].sort((a,b2)=>MONTHS.indexOf(a)-MONTHS.indexOf(b2));
+
+  const months    = [...presState.months].sort((a,b2)=>MONTHS.indexOf(a)-MONTHS.indexOf(b2));
   const lastMonth = months[months.length - 1];
   const ytdMonths = MONTHS.slice(0, MONTHS.indexOf(lastMonth) + 1);
 
@@ -166,65 +241,56 @@ function presShowDashboard() {
   const extra    = presAggregateExtra(agg.staff);
   const extraYtd = presAggregateExtra(aggYtd.staff);
 
-  // stashed so presRenderProductGrid()/the period-YTD toggle can re-render
-  // the Product Performance cards without recomputing everything above.
-  presState.dash = { agg, aggYtd, extra, extraYtd, lastMonth, months };
+  const periodLabel = presPeriodLabel(months);
+  const ytdLabel    = presYtdLabel(lastMonth);
 
-  document.getElementById("dashTitle").textContent = "🏢 " + b.branchName + " — " + months.join("+");
+  presState.dash = { agg, aggYtd, extra, extraYtd, lastMonth, months, periodLabel, ytdLabel };
 
-  document.getElementById("branchModeToggle").innerHTML = `
-    <span class="pres-chip ${presState.branchMode!=="ytd"?"on":""}" data-branch-mode="period">This Period</span>
-    <span class="pres-chip ${presState.branchMode==="ytd"?"on":""}" data-branch-mode="ytd">YTD (Apr–${lastMonth})</span>`;
+  document.getElementById("dashTitle").textContent = "🏢 " + b.branchName + " — " + periodLabel;
+
+  // Remove old toggle (not needed anymore)
+  document.getElementById("branchModeToggle").innerHTML = "";
 
   presRenderProductGrid();
 
+  // Staff strip
   document.getElementById("dashStaffGrid").innerHTML = agg.staff.map((s, i) => {
-    const spct = presStaffOverallPct(s, months);
+    const spct    = presStaffOverallPct(s, months);
+    const spctYtd = presStaffOverallPct(s, ytdMonths);
     return `<div class="pres-staff-chip" data-staff-idx="${i}">
-      <span class="c-ring" style="background:${presPctBg(spct)};border:1.5px solid ${presPctColor(spct)}">${spct}%</span>
+      <span class="c-ring" style="background:${presPctBg(spct)}">${spct}%</span>
       <span class="c-name">${presEsc(s.name)}</span>
+      <span class="c-ytd-badge" style="color:${presPctColor(spctYtd)}">YTD ${spctYtd}%</span>
     </div>`;
   }).join("");
-  presState.currentStaffList = agg.staff; // for the delegated click handler below
 
+  presState.currentStaffList = agg.staff;
   presState.staffName = null;
   presShowScreen("dash");
-}
-
-function presSetBranchMode(mode) {
-  presState.branchMode = mode;
-  document.querySelectorAll('#branchModeToggle [data-branch-mode]').forEach(chip => {
-    chip.classList.toggle("on", chip.dataset.branchMode === mode);
-  });
-  presRenderProductGrid();
 }
 
 function presRenderProductGrid() {
   const d = presState.dash;
   if (!d) return;
-  const isYtd = presState.branchMode === "ytd";
-  const totals = isYtd ? d.aggYtd.totals : d.agg.totals;
-  const extra  = isYtd ? d.extraYtd : d.extra;
+  const { agg, aggYtd, extra, extraYtd, periodLabel, ytdLabel } = d;
+
+  /* Legend pills go into the top strip */
+  const pillsEl = document.getElementById("dashLegendPills");
+  if (pillsEl) pillsEl.innerHTML = `
+    <span class="dual-legend-pill period-pill">📅 ${presEsc(periodLabel)}</span>
+    <span class="dual-legend-pill ytd-pill">📈 ${presEsc(ytdLabel)}</span>`;
 
   document.getElementById("dashProducts").innerHTML = `
-    <div class="pres-legend">
-      <span><span class="leg-dot filled"></span> Achievement</span>
-      <span><span class="leg-dot hollow"></span> Target</span>
-    </div>
     <div class="pres-prod-grid">
-    ${Object.keys(totals).map(k => {
-      const t = totals[k];
-      const out = extra.outstanding[k] || null;
-      const due = (k === "RD" && extra.rdDueAmount) ? { amount: extra.rdDueAmount, count: extra.rdDueCount } : null;
-      return presProdCardHTML(k, t.ach, t.tgt, out, due);
+    ${Object.keys(agg.totals).map(k => {
+      const t    = agg.totals[k];
+      const tYtd = aggYtd.totals[k] || { ach: 0, tgt: 0 };
+      const out  = extra.outstanding[k]    || null;
+      const due  = (k === "RD" && extra.rdDueAmount) ? { amount: extra.rdDueAmount, count: extra.rdDueCount } : null;
+      return presDualProdCardHTML(k, t.ach, t.tgt, tYtd.ach, tYtd.tgt, out, due, periodLabel, ytdLabel);
     }).join("")}
     </div>`;
 }
-
-document.getElementById("branchModeToggle").addEventListener("click", e => {
-  const chip = e.target.closest("[data-branch-mode]");
-  if (chip) presSetBranchMode(chip.dataset.branchMode);
-});
 
 document.getElementById("dashStaffGrid").addEventListener("click", e => {
   const tile = e.target.closest(".pres-staff-chip");
@@ -237,14 +303,8 @@ document.getElementById("dashStaffGrid").addEventListener("click", e => {
 /* ═══════════════ SCREEN 4 — STAFF DETAIL ═══════════════ */
 function presSelectStaff(name) {
   presState.staffName = name;
-  presState.staffMode = "period"; // reset each time a new staff is opened
   presRenderStaffCards();
   presShowScreen("staff");
-}
-
-function presSetStaffMode(mode) {
-  presState.staffMode = mode;
-  presRenderStaffCards();
 }
 
 function presRenderStaffCards() {
@@ -255,62 +315,57 @@ function presRenderStaffCards() {
   const periodMonths = [...presState.months].sort((a,b2)=>MONTHS.indexOf(a)-MONTHS.indexOf(b2));
   const lastMonth    = periodMonths[periodMonths.length - 1];
   const ytdMonths    = MONTHS.slice(0, MONTHS.indexOf(lastMonth) + 1);
-  const isYtd        = presState.staffMode === "ytd";
-  const months       = isYtd ? ytdMonths : periodMonths;
-  const periodLabel  = isYtd ? ("Apr–" + lastMonth + " (YTD)") : periodMonths.join("+");
+  const periodLabel  = presPeriodLabel(periodMonths);
+  const ytdLabel     = presYtdLabel(lastMonth);
 
   const svc = presServiceStr(s.doj);
   document.getElementById("staffAvatar").textContent = initials(s.name);
-  document.getElementById("staffName").textContent = s.name;
-  document.getElementById("staffSub").textContent =
-    presState.branchName + " · " + periodLabel + (svc ? " · " + svc + " service" : "");
+  document.getElementById("staffName").textContent   = s.name;
+  document.getElementById("staffSub").textContent    =
+    presState.branchName + " · " + periodLabel + " & " + ytdLabel + (svc ? " · " + svc : "");
 
-  document.getElementById("staffModeToggle").innerHTML = `
-    <span class="pres-chip ${!isYtd?"on":""}" data-staff-mode="period">This Period</span>
-    <span class="pres-chip ${isYtd?"on":""}" data-staff-mode="ytd">YTD (Apr–${lastMonth})</span>`;
+  // Remove toggle — no longer needed
+  document.getElementById("staffModeToggle").innerHTML = "";
+
+  /* Inject period legend pills into the staffhead pill row */
+  const staffPillsEl = document.getElementById("staffLegendPills");
+  if (staffPillsEl) staffPillsEl.innerHTML = `
+    <span class="dual-legend-pill period-pill">📅 ${presEsc(periodLabel)}</span>
+    <span class="dual-legend-pill ytd-pill">📈 ${presEsc(ytdLabel)}</span>`;
 
   document.getElementById("staffCards").innerHTML = `
-    <div class="pres-legend">
-      <span><span class="leg-dot filled"></span> Achievement</span>
-      <span><span class="leg-dot hollow"></span> Target</span>
-    </div>
     <div class="pres-prod-grid">
     ${Object.keys(s.metrics).map(k => {
-      const metric = s.metrics[k];
-      const r = calc(metric, months, s.doj); // { ach, tgt, pct, gap } — reuses script.js's own calc()
+      const metric    = s.metrics[k];
+      const rPeriod   = calc(metric, periodMonths, s.doj);
+      const rYtd      = calc(metric, ytdMonths,    s.doj);
       const out = (OUT_CFG[k] && metric.outstanding) ? { amount: metric.outstanding, count: metric.outstandingCount } : null;
-      const due = (k === "RD" && metric.dueAmount) ? { amount: metric.dueAmount, count: metric.dueCount } : null;
-      return presProdCardHTML(k, r.ach, r.tgt, out, due);
+      const due = (k === "RD" && metric.dueAmount)   ? { amount: metric.dueAmount,   count: metric.dueCount }         : null;
+      return presDualProdCardHTML(k, rPeriod.ach, rPeriod.tgt, rYtd.ach, rYtd.tgt, out, due, periodLabel, ytdLabel);
     }).join("") || `<div class="pres-empty">No product data for this staff member.</div>`}
     </div>`;
 
   presRenderStaffSwitchStrip(b);
 }
 
-// Tiny sticky strip of every other staff member in this branch, so switching
-// doesn't require going back to the dashboard. Reuses presState.currentStaffList
-// (set by presShowDashboard) when available, falling back to a fresh filter.
 function presRenderStaffSwitchStrip(b) {
   const list = (presState.currentStaffList && presState.currentStaffList.length)
     ? presState.currentStaffList
     : (b.staff || []).filter(x => x.name.toUpperCase() !== "TOTAL");
-  document.getElementById("staffSwitchStrip").innerHTML = list.map(st => `
-    <span class="pres-staffswitch-chip ${st.name === presState.staffName ? "on" : ""}" data-switch-name="${presEsc(st.name)}">${presEsc(st.name)}</span>
-  `).join("");
+  document.getElementById("staffSwitchStrip").innerHTML = list.map(st =>
+    `<span class="pres-staffswitch-chip ${st.name === presState.staffName ? "on" : ""}" data-switch-name="${presEsc(st.name)}">${presEsc(st.name)}</span>`
+  ).join("");
 }
 
 document.getElementById("staffModeToggle").addEventListener("click", e => {
-  const chip = e.target.closest("[data-staff-mode]");
-  if (chip) presSetStaffMode(chip.dataset.staffMode);
+  /* retained for HTML compatibility — no-op in v2 */
 });
-
 document.getElementById("staffSwitchStrip").addEventListener("click", e => {
   const chip = e.target.closest("[data-switch-name]");
   if (chip && chip.dataset.switchName !== presState.staffName) presSelectStaff(chip.dataset.switchName);
 });
 
-/* ═══════════════ SHARED AGGREGATION (mirrors renderSnap's math in script.js,
-   so figures on this screen always match the main dashboard) ═══════════════ */
+/* ═══════════════ AGGREGATION ═══════════════ */
 function presAggregateBranch(b, months) {
   const staff = (b.staff || []).filter(s => s.name.toUpperCase() !== "TOTAL");
   const totals = {};
@@ -324,7 +379,7 @@ function presAggregateBranch(b, months) {
   });
   if (totals["BusinessLoan"]) {
     const blMonthly = b.blBranchMonthlyTarget || 0;
-    const blAnnual  = b.blBranchTotalTarget || 0;
+    const blAnnual  = b.blBranchTotalTarget   || 0;
     totals["BusinessLoan"].tgt = blAnnual > 0 ? blAnnual : (blMonthly * months.length);
   }
   if (totals["GoldLoan"] && b.glBranchMonthlyTarget) {
@@ -348,7 +403,6 @@ function presAggregateBranch(b, months) {
     const p = totals[k].tgt > 0 ? Math.round(totals[k].ach / totals[k].tgt * 100) : 100;
     if (p < 100) belowProd++;
   }
-
   return { totals, staff, staffCount: staff.length, onTgt, belowProd };
 }
 
@@ -370,14 +424,14 @@ function presStaffOverallPct(s, months) {
 }
 
 function presAggregateExtra(staffList) {
-  const outstanding = {}; // key -> { amount, count } — only for products OUT_CFG covers (Investment, GoldLoan, RD)
+  const outstanding = {};
   let rdDueAmount = 0, rdDueCount = 0;
   staffList.forEach(s => {
     for (const k in s.metrics) {
       const m = s.metrics[k];
       if (OUT_CFG[k] && m.outstanding) {
         if (!outstanding[k]) outstanding[k] = { amount: 0, count: 0 };
-        outstanding[k].amount += m.outstanding || 0;
+        outstanding[k].amount += m.outstanding  || 0;
         outstanding[k].count  += m.outstandingCount || 0;
       }
     }
@@ -387,19 +441,22 @@ function presAggregateExtra(staffList) {
   return { outstanding, rdDueAmount, rdDueCount };
 }
 
-// Service duration from DOJ ("DD-MMM-YYYY"), reuses script.js's own parseDOJDate.
 function presServiceStr(dojStr) {
   const d = parseDOJDate(dojStr);
   if (!d) return null;
   const now = new Date();
-  let months = (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
+  let months = (now.getFullYear()-d.getFullYear())*12+(now.getMonth()-d.getMonth());
   if (now.getDate() < d.getDate()) months--;
   if (months < 0) months = 0;
-  const yrs = Math.floor(months / 12), mos = months % 12;
-  if (yrs === 0) return mos + (mos === 1 ? " mo" : " mos");
-  if (mos === 0) return yrs + (yrs === 1 ? " yr" : " yrs");
-  return yrs + (yrs === 1 ? " yr " : " yrs ") + mos + (mos === 1 ? " mo" : " mos");
+  const yrs = Math.floor(months/12), mos = months%12;
+  if (yrs === 0) return mos+(mos===1?" mo":" mos");
+  if (mos === 0) return yrs+(yrs===1?" yr":" yrs");
+  return yrs+(yrs===1?" yr ":" yrs ")+mos+(mos===1?" mo":" mos");
 }
 
-function presPctColor(p) { return p >= 100 ? "#16a34a" : p >= 75 ? "#d97706" : "#dc2626"; }  // border/accent only, never text
-function presPctBg(p)    { return p >= 100 ? "#bbf7d0" : p >= 75 ? "#fde68a" : "#fecaca"; }  // light tint, dark text on top
+/* Light-theme: % badge uses CSS classes (pct-green / pct-amber / pct-red) */
+function presPctClass(p){ return p>=100?"pct-green":p>=75?"pct-amber":"pct-red"; }
+/* Ring bg colours stay solid — these are white-text circles so keep them dark */
+function presPctBg(p)   { return p>=100?"#15803d":p>=75?"#b45309":"#b91c1c"; }
+/* Legacy inline-colour helper — not used in v3 but kept for safety */
+function presPctColor(p){ return p>=100?"#15803d":p>=75?"#b45309":"#b91c1c"; }
