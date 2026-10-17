@@ -159,7 +159,7 @@ function presQuickRange(kind) {
    Renders one product card that shows BOTH periods side by side.
    Left col = selected period  |  Right col = YTD
    ══════════════════════════════════════════════════════════════ */
-function presDualProdCardHTML(k, ach, tgt, achYtd, tgtYtd, outstanding, due, periodLabel, ytdLabel) {
+function presDualProdCardHTML(k, ach, tgt, achYtd, tgtYtd, outstanding, due, inflow, periodLabel, ytdLabel) {
   const pct    = tgt    > 0 ? Math.round(ach    / tgt    * 100) : 100;
   const pctYtd = tgtYtd > 0 ? Math.round(achYtd / tgtYtd * 100) : 100;
   const gap    = ach    - tgt;
@@ -171,6 +171,10 @@ function presDualProdCardHTML(k, ach, tgt, achYtd, tgtYtd, outstanding, due, per
     : "";
   const dueRow = due
     ? `<div class="pp-extra pp-due">⏰ Due: <b>${fmtFull(due.amount,k)}</b>${due.count?` <span class="pp-extra-n">(${due.count} a/c)</span>`:""}</div>`
+    : "";
+  /* RD Inflow YTD row — shown only on RD card, below Outstanding */
+  const inflowRow = (k === "RD" && inflow)
+    ? `<div class="pp-extra pp-inflow">💰 Inflow YTD: <b>${fmtFull(inflow.amount,k)}</b>${inflow.count?` <span class="pp-extra-n">(${inflow.count} a/c)</span>`:""}</div>`
     : "";
 
   return `<div class="pres-prod-card dual-card">
@@ -223,7 +227,7 @@ function presDualProdCardHTML(k, ach, tgt, achYtd, tgtYtd, outstanding, due, per
       </div>
     </div>
 
-    ${outRow}${dueRow}
+    ${outRow}${inflowRow}${dueRow}
   </div>`;
 }
 
@@ -287,7 +291,7 @@ function presRenderProductGrid() {
       const tYtd = aggYtd.totals[k] || { ach: 0, tgt: 0 };
       const out  = extra.outstanding[k]    || null;
       const due  = (k === "RD" && extra.rdDueAmount) ? { amount: extra.rdDueAmount, count: extra.rdDueCount } : null;
-      return presDualProdCardHTML(k, t.ach, t.tgt, tYtd.ach, tYtd.tgt, out, due, periodLabel, ytdLabel);
+      return presDualProdCardHTML(k, t.ach, t.tgt, tYtd.ach, tYtd.tgt, out, due, null, periodLabel, ytdLabel);
     }).join("")}
     </div>`;
 }
@@ -341,7 +345,7 @@ function presRenderStaffCards() {
       const rYtd      = calc(metric, ytdMonths,    s.doj);
       const out = (OUT_CFG[k] && metric.outstanding) ? { amount: metric.outstanding, count: metric.outstandingCount } : null;
       const due = (k === "RD" && metric.dueAmount)   ? { amount: metric.dueAmount,   count: metric.dueCount }         : null;
-      return presDualProdCardHTML(k, rPeriod.ach, rPeriod.tgt, rYtd.ach, rYtd.tgt, out, due, periodLabel, ytdLabel);
+      return presDualProdCardHTML(k, rPeriod.ach, rPeriod.tgt, rYtd.ach, rYtd.tgt, out, due, null, periodLabel, ytdLabel);
     }).join("") || `<div class="pres-empty">No product data for this staff member.</div>`}
     </div>`;
 
@@ -460,3 +464,210 @@ function presPctClass(p){ return p>=100?"pct-green":p>=75?"pct-amber":"pct-red";
 function presPctBg(p)   { return p>=100?"#15803d":p>=75?"#b45309":"#b91c1c"; }
 /* Legacy inline-colour helper — not used in v3 but kept for safety */
 function presPctColor(p){ return p>=100?"#15803d":p>=75?"#b45309":"#b91c1c"; }
+
+/* ══════════════════════════════════════════════════════════
+   RD INFLOW YTD — fetched live from Google Sheets CSV
+   CSV columns: Sl.No | Staff Members | Company | Branch |
+                Total inflow | Total Count | Emp Code
+   Matching priority:
+     1. Emp Code (clubs all rows with same code)
+     2. Name + Branch fallback (when no code match)
+   Result stored in presInflowMap:
+     key = empCode (normalised) → { amount, count }
+     key = "name||branch"       → { amount, count }   (fallback)
+   ══════════════════════════════════════════════════════════ */
+
+const INFLOW_CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTxcZ5BVpz-jvCQze4msaEqv1uSUTS-Z-mulCPYUU9xvh0_8R4aDoMmOIMclJQbIeeVWAtA9qkyJ8Vv/pub?gid=2022218927&single=true&output=csv";
+
+/* presInflowMap populated once on load; null means still loading */
+let presInflowMap = null;
+let presInflowLoading = false;
+
+function presNorm(s) {
+  return String(s || "").trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+function presParseInflowCSV(text) {
+  const map = {};               // empCode → { amount, count }
+  const nameMap = {};           // "NAME||BRANCH" → { amount, count }
+
+  const lines = text.split(/\r?\n/);
+  /* Find header row — look for "Emp Code" column */
+  let headerIdx = -1;
+  let cols = { slno:0, name:1, company:2, branch:3, amount:4, count:5, empCode:6 };
+
+  for (let i = 0; i < Math.min(lines.length, 5); i++) {
+    const row = lines[i].split(",").map(c => c.replace(/^"|"$/g,"").trim());
+    const lower = row.map(c => c.toLowerCase());
+    if (lower.some(c => c.includes("emp") || c.includes("staff"))) {
+      headerIdx = i;
+      /* Detect actual column positions from header */
+      lower.forEach((c, j) => {
+        if (c.includes("staff") || c.includes("name"))       cols.name    = j;
+        if (c.includes("branch"))                             cols.branch  = j;
+        if (c.includes("inflow") || c.includes("amount"))    cols.amount  = j;
+        if (c.includes("count"))                              cols.count   = j;
+        if (c.includes("emp"))                                cols.empCode = j;
+      });
+      break;
+    }
+  }
+
+  const dataStart = headerIdx >= 0 ? headerIdx + 1 : 1;
+
+  for (let i = dataStart; i < lines.length; i++) {
+    const raw = lines[i];
+    if (!raw.trim()) continue;
+
+    /* Handle quoted CSV fields */
+    const row = [];
+    let inQ = false, cur = "";
+    for (let ci = 0; ci < raw.length; ci++) {
+      const ch = raw[ci];
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { row.push(cur.trim()); cur = ""; }
+      else cur += ch;
+    }
+    row.push(cur.trim());
+
+    const name    = presNorm(row[cols.name]);
+    const branch  = presNorm(row[cols.branch]);
+    const rawAmt  = String(row[cols.amount] || "").replace(/[,₹\s]/g, "");
+    const amount  = parseFloat(rawAmt) || 0;
+    const count   = parseInt(row[cols.count]) || 0;
+    const empCode = presNorm(row[cols.empCode]);
+
+    if (!name && !empCode) continue;
+
+    /* Club by Emp Code */
+    if (empCode) {
+      if (!map[empCode]) map[empCode] = { amount: 0, count: 0 };
+      map[empCode].amount += amount;
+      map[empCode].count  += count;
+    }
+
+    /* Always also build name+branch fallback */
+    const nbKey = name + "||" + branch;
+    if (!nameMap[nbKey]) nameMap[nbKey] = { amount: 0, count: 0 };
+    nameMap[nbKey].amount += amount;
+    nameMap[nbKey].count  += count;
+  }
+
+  return { byCode: map, byNameBranch: nameMap };
+}
+
+function presFetchInflow(callback) {
+  if (presInflowMap) { callback(presInflowMap); return; }
+  if (presInflowLoading) {
+    /* poll until ready */
+    const iv = setInterval(() => {
+      if (presInflowMap) { clearInterval(iv); callback(presInflowMap); }
+    }, 200);
+    return;
+  }
+  presInflowLoading = true;
+  fetch(INFLOW_CSV_URL)
+    .then(r => r.text())
+    .then(text => {
+      presInflowMap = presParseInflowCSV(text);
+      presInflowLoading = false;
+      callback(presInflowMap);
+    })
+    .catch(() => {
+      presInflowMap = { byCode: {}, byNameBranch: {} }; /* fail silently */
+      presInflowLoading = false;
+      callback(presInflowMap);
+    });
+}
+
+/* Look up one staff member's inflow data.
+   staffObj must have .empCode (or .emp_code) and .name.
+   branchName is the branch for name fallback. */
+function presGetStaffInflow(staffObj, branchName, inflowMap) {
+  if (!inflowMap) return null;
+  const code = presNorm(staffObj.empCode || staffObj.emp_code || staffObj.employeeCode || "");
+  if (code && inflowMap.byCode[code]) return inflowMap.byCode[code];
+  /* fallback: name + branch */
+  const nbKey = presNorm(staffObj.name) + "||" + presNorm(branchName);
+  return inflowMap.byNameBranch[nbKey] || null;
+}
+
+/* Sum inflow for all staff in a branch */
+function presGetBranchInflow(staffList, branchName, inflowMap) {
+  let amount = 0, count = 0;
+  staffList.forEach(s => {
+    const inf = presGetStaffInflow(s, branchName, inflowMap);
+    if (inf) { amount += inf.amount; count += inf.count; }
+  });
+  return amount > 0 ? { amount, count } : null;
+}
+
+/* ── Hook inflow into product grid render ──
+   We patch presRenderProductGrid and presRenderStaffCards
+   to fetch inflow first, then render with it. */
+
+const _origRenderProductGrid = presRenderProductGrid;
+presRenderProductGrid = function() {
+  presFetchInflow(inflowMap => {
+    const d = presState.dash;
+    if (!d) return;
+    const { agg, aggYtd, extra, extraYtd, periodLabel, ytdLabel } = d;
+    const b = allData.find(x => x.branchName === presState.branchName);
+
+    /* Legend pills */
+    const pillsEl = document.getElementById("dashLegendPills");
+    if (pillsEl) pillsEl.innerHTML = `
+      <span class="dual-legend-pill period-pill">📅 ${presEsc(periodLabel)}</span>
+      <span class="dual-legend-pill ytd-pill">📈 ${presEsc(ytdLabel)}</span>`;
+
+    document.getElementById("dashProducts").innerHTML = `
+      <div class="pres-prod-grid">
+      ${Object.keys(agg.totals).map(k => {
+        const t    = agg.totals[k];
+        const tYtd = aggYtd.totals[k] || { ach: 0, tgt: 0 };
+        const out  = extra.outstanding[k] || null;
+        const due  = (k === "RD" && extra.rdDueAmount) ? { amount: extra.rdDueAmount, count: extra.rdDueCount } : null;
+        /* RD Inflow YTD — branch aggregate */
+        const inflow = (k === "RD") ? presGetBranchInflow(agg.staff, presState.branchName, inflowMap) : null;
+        return presDualProdCardHTML(k, t.ach, t.tgt, tYtd.ach, tYtd.tgt, out, due, inflow, periodLabel, ytdLabel);
+      }).join("")}
+      </div>`;
+  });
+};
+
+const _origRenderStaffCards = presRenderStaffCards;
+presRenderStaffCards = function() {
+  /* Call original first to render immediately, then patch inflow in */
+  _origRenderStaffCards();
+  presFetchInflow(inflowMap => {
+    const b = allData.find(x => x.branchName === presState.branchName);
+    const s = (b && b.staff || []).find(x => x.name === presState.staffName);
+    if (!s) return;
+
+    const periodMonths = [...presState.months].sort((a,b2) => MONTHS.indexOf(a)-MONTHS.indexOf(b2));
+    const lastMonth    = periodMonths[periodMonths.length - 1];
+    const ytdMonths    = MONTHS.slice(0, MONTHS.indexOf(lastMonth) + 1);
+    const periodLabel  = presPeriodLabel(periodMonths);
+    const ytdLabel     = presYtdLabel(lastMonth);
+
+    const staffInflow = presGetStaffInflow(s, presState.branchName, inflowMap);
+
+    document.getElementById("staffCards").innerHTML = `
+      <div class="pres-prod-grid">
+      ${Object.keys(s.metrics).map(k => {
+        const metric  = s.metrics[k];
+        const rPeriod = calc(metric, periodMonths, s.doj);
+        const rYtd    = calc(metric, ytdMonths,    s.doj);
+        const out = (OUT_CFG[k] && metric.outstanding) ? { amount: metric.outstanding, count: metric.outstandingCount } : null;
+        const due = (k === "RD" && metric.dueAmount)   ? { amount: metric.dueAmount,   count: metric.dueCount }         : null;
+        /* RD Inflow YTD — per staff */
+        const inflow = (k === "RD") ? staffInflow : null;
+        return presDualProdCardHTML(k, rPeriod.ach, rPeriod.tgt, rYtd.ach, rYtd.tgt, out, due, inflow, periodLabel, ytdLabel);
+      }).join("") || `<div class="pres-empty">No product data.</div>`}
+      </div>`;
+
+    /* Re-render switcher strip too */
+    presRenderStaffSwitchStrip(b);
+  });
+};
