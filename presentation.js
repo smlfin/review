@@ -166,13 +166,14 @@ function presDualProdCardHTML(k, ach, tgt, achYtd, tgtYtd, outstanding, due, inf
   const gapYtd = achYtd - tgtYtd;
   const color  = PROD_COLOR[k] || "#2d6bff";
 
-  const outRow = outstanding
-    ? `<div class="pp-extra">📦 Outstanding: <b>${fmtFull(outstanding.amount,k)}</b>${outstanding.count?` <span class="pp-extra-n">(${outstanding.count} a/c)</span>`:""}</div>`
+  /* Outstanding + Due share ONE row — Due sits in the right half of the same strip */
+  const outDueRow = (outstanding || due)
+    ? `<div class="pp-extra-row">
+        ${outstanding ? `<span class="pp-extra pp-extra-half">📦 Outstanding: <b>${fmtFull(outstanding.amount,k)}</b>${outstanding.count?` <span class="pp-extra-n">(${outstanding.count} a/c)</span>`:""}</span>` : `<span></span>`}
+        ${due         ? `<span class="pp-extra pp-due pp-extra-half">⏰ Due: <b>${fmtFull(due.amount,k)}</b>${due.count?` <span class="pp-extra-n">(${due.count} a/c)</span>`:""}</span>` : ""}
+       </div>`
     : "";
-  const dueRow = due
-    ? `<div class="pp-extra pp-due">⏰ Due: <b>${fmtFull(due.amount,k)}</b>${due.count?` <span class="pp-extra-n">(${due.count} a/c)</span>`:""}</div>`
-    : "";
-  /* RD Inflow YTD row — shown only on RD card, below Outstanding */
+  /* Inflow YTD — full-width row below */
   const inflowRow = (k === "RD" && inflow)
     ? `<div class="pp-extra pp-inflow">💰 Inflow YTD: <b>${fmtFull(inflow.amount,k)}</b>${inflow.count?` <span class="pp-extra-n">(${inflow.count} a/c)</span>`:""}</div>`
     : "";
@@ -227,7 +228,7 @@ function presDualProdCardHTML(k, ach, tgt, achYtd, tgtYtd, outstanding, due, inf
       </div>
     </div>
 
-    ${outRow}${inflowRow}${dueRow}
+    ${outDueRow}${inflowRow}
   </div>`;
 }
 
