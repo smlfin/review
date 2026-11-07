@@ -467,19 +467,16 @@ function presPctBg(p)   { return p>=100?"#15803d":p>=75?"#b45309":"#b91c1c"; }
 function presPctColor(p){ return p>=100?"#15803d":p>=75?"#b45309":"#b91c1c"; }
 
 /* ══════════════════════════════════════════════════════════
-   RD INFLOW YTD — fetched live from Google Sheets CSV
-   CSV columns: Sl.No | Staff Members | Company | Branch |
-                Total inflow | Total Count | Emp Code
-   Matching priority:
-     1. Emp Code (clubs all rows with same code)
-     2. Name + Branch fallback (when no code match)
-   Result stored in presInflowMap:
-     key = empCode (normalised) → { amount, count }
-     key = "name||branch"       → { amount, count }   (fallback)
+   RD INFLOW YTD — SML, fetched live from Google Sheets CSV
+   CSV columns: Sl_No, Date, Instalment, Staff_Name, Emp_Code, Company, Branch
+   Inflow = sum of Instalment. Stored per month (Apr, May, …) so
+   YTD = Apr → last selected month.
+   Staff: Emp_Code → roster name, else Staff_Name (SML check).
+   Branch: Branch column, fallback = sum of the branch's staff.
    ══════════════════════════════════════════════════════════ */
 
 const INFLOW_CSV_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTxcZ5BVpz-jvCQze4msaEqv1uSUTS-Z-mulCPYUU9xvh0_8R4aDoMmOIMclJQbIeeVWAtA9qkyJ8Vv/pub?gid=2022218927&single=true&output=csv";
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTxcZ5BVpz-jvCQze4msaEqv1uSUTS-Z-mulCPYUU9xvh0_8R4aDoMmOIMclJQbIeeVWAtA9qkyJ8Vv/pub?gid=862887839&single=true&output=csv";
 
 /* presInflowMap populated once on load; null means still loading */
 let presInflowMap = null;
@@ -489,79 +486,76 @@ function presNorm(s) {
   return String(s || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
-function presParseInflowCSV(text) {
-  const map = {};               // empCode → { amount, count }
-  const nameMap = {};           // "NAME||BRANCH" → { amount, count }
-
-  const lines = text.split(/\r?\n/);
-  /* Find header row — look for "Emp Code" column */
-  let headerIdx = -1;
-  let cols = { slno:0, name:1, company:2, branch:3, amount:4, count:5, empCode:6 };
-
-  for (let i = 0; i < Math.min(lines.length, 5); i++) {
-    const row = lines[i].split(",").map(c => c.replace(/^"|"$/g,"").trim());
-    const lower = row.map(c => c.toLowerCase());
-    if (lower.some(c => c.includes("emp") || c.includes("staff"))) {
-      headerIdx = i;
-      /* Detect actual column positions from header */
-      lower.forEach((c, j) => {
-        if (c.includes("staff") || c.includes("name"))       cols.name    = j;
-        if (c.includes("branch"))                             cols.branch  = j;
-        if (c.includes("inflow") || c.includes("amount"))    cols.amount  = j;
-        if (c.includes("count"))                              cols.count   = j;
-        if (c.includes("emp"))                                cols.empCode = j;
-      });
-      break;
-    }
+function presCsvLine(line) {
+  const cols = []; let cur = "", q = false;
+  for (const ch of line) {
+    if (ch === '"') q = !q;
+    else if (ch === ',' && !q) { cols.push(cur); cur = ""; }
+    else cur += ch;
   }
+  cols.push(cur);
+  return cols;
+}
 
-  const dataStart = headerIdx >= 0 ? headerIdx + 1 : 1;
+/* dd-mm-yyyy, dd/mm/yyyy, yyyy-mm-dd, dd-Mon-yyyy → Date | null */
+function presParseInflowDate(str) {
+  str = (str || "").trim();
+  if (!str) return null;
+  let m;
+  if ((m = str.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/))) return new Date(+m[1], +m[2]-1, +m[3]);
+  if ((m = str.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})/))) return new Date(+(m[3].length===2?"20"+m[3]:m[3]), +m[2]-1, +m[1]);
+  const d = new Date(str.replace(/-/g, " "));
+  return isNaN(d.getTime()) ? null : d;
+}
 
-  for (let i = dataStart; i < lines.length; i++) {
-    const raw = lines[i];
-    if (!raw.trim()) continue;
+async function presParseInflowCSV(text) {
+  const staff = {}, branch = {};          // key → { Apr: amt, … }
+  const rows = text.split(/\r?\n/);
+  if (rows.length < 2) return { staff, branch };
 
-    /* Handle quoted CSV fields */
-    const row = [];
-    let inQ = false, cur = "";
-    for (let ci = 0; ci < raw.length; ci++) {
-      const ch = raw[ci];
-      if (ch === '"') { inQ = !inQ; }
-      else if (ch === ',' && !inQ) { row.push(cur.trim()); cur = ""; }
-      else cur += ch;
+  const h = presCsvLine(rows[0]).map(x => x.replace(/"/g, "").trim());
+  const iDate = h.indexOf("Date"), iInst = h.indexOf("Instalment"), iName = h.indexOf("Staff_Name"),
+        iCode = h.indexOf("Emp_Code"), iComp = h.indexOf("Company"), iBr = h.indexOf("Branch");
+  if (iInst === -1 || iName === -1) return { staff, branch };
+
+  let roster = window.__empRoster;
+  if (!roster || !Object.keys(roster).length) { try { roster = await fetchEmployeeRoster(); } catch (e) { roster = {}; } }
+
+  for (let i = 1; i < rows.length; i++) {
+    if (!rows[i].trim()) continue;
+    const c = presCsvLine(rows[i]);
+    const comp = (c[iComp] || "").trim();
+    const code = iCode !== -1 ? (c[iCode] || "").trim() : "";
+    let name = "";
+    if (/^8\d{2,}$/.test(code)) {
+      const hit = roster[String(parseInt(code, 10))];
+      if (hit && hit.name) name = hit.name.trim();
     }
-    row.push(cur.trim());
-
-    const name    = presNorm(row[cols.name]);
-    const branch  = presNorm(row[cols.branch]);
-    const rawAmt  = String(row[cols.amount] || "").replace(/[,₹\s]/g, "");
-    const amount  = parseFloat(rawAmt) || 0;
-    const count   = parseInt(row[cols.count]) || 0;
-    const empCode = presNorm(row[cols.empCode]);
-
-    if (!name && !empCode) continue;
-
-    /* Club by Emp Code */
-    if (empCode) {
-      if (!map[empCode]) map[empCode] = { amount: 0, count: 0 };
-      map[empCode].amount += amount;
-      map[empCode].count  += count;
+    if (!name) {
+      const raw = (c[iName] || "").trim();
+      if (!raw) continue;
+      if (!isSMLCompany(comp) && !isKnownSMLStaffName(raw)) continue;
+      name = raw;
     }
+    const amt = parseFloat((c[iInst] || "").replace(/[,"₹\s]/g, "")) || 0;
+    if (!amt) continue;
 
-    /* Always also build name+branch fallback */
-    const nbKey = name + "||" + branch;
-    if (!nameMap[nbKey]) nameMap[nbKey] = { amount: 0, count: 0 };
-    nameMap[nbKey].amount += amount;
-    nameMap[nbKey].count  += count;
+    const d = iDate !== -1 ? presParseInflowDate(c[iDate]) : null;
+    if (!d || d < FY_TARGET_START) continue;               // current FY only (from 01-Apr)
+    const mk = d.toLocaleString("en-US", { month: "short" });
+    if (!MONTHS.includes(mk)) continue;
+
+    const sk = presNorm(name);
+    (staff[sk] = staff[sk] || {})[mk] = (staff[sk][mk] || 0) + amt;
+    const bk = presNorm(iBr !== -1 ? c[iBr] : "");
+    if (bk) (branch[bk] = branch[bk] || {})[mk] = (branch[bk][mk] || 0) + amt;
   }
-
-  return { byCode: map, byNameBranch: nameMap };
+  return { staff, branch };
 }
 
 function presFetchInflow(callback) {
   if (presInflowMap) { callback(presInflowMap); return; }
   if (presInflowLoading) {
-    /* poll until ready */
     const iv = setInterval(() => {
       if (presInflowMap) { clearInterval(iv); callback(presInflowMap); }
     }, 200);
@@ -570,38 +564,36 @@ function presFetchInflow(callback) {
   presInflowLoading = true;
   fetch(INFLOW_CSV_URL)
     .then(r => r.text())
-    .then(text => {
-      presInflowMap = presParseInflowCSV(text);
-      presInflowLoading = false;
-      callback(presInflowMap);
-    })
-    .catch(() => {
-      presInflowMap = { byCode: {}, byNameBranch: {} }; /* fail silently */
+    .then(presParseInflowCSV)
+    .then(map => { presInflowMap = map; presInflowLoading = false; callback(map); })
+    .catch(e => {
+      console.error("Inflow CSV error:", e);
+      presInflowMap = { staff: {}, branch: {} };
       presInflowLoading = false;
       callback(presInflowMap);
     });
 }
 
-/* Look up one staff member's inflow data.
-   staffObj must have .empCode (or .emp_code) and .name.
-   branchName is the branch for name fallback. */
-function presGetStaffInflow(staffObj, branchName, inflowMap) {
-  if (!inflowMap) return null;
-  const code = presNorm(staffObj.empCode || staffObj.emp_code || staffObj.employeeCode || "");
-  if (code && inflowMap.byCode[code]) return inflowMap.byCode[code];
-  /* fallback: name + branch */
-  const nbKey = presNorm(staffObj.name) + "||" + presNorm(branchName);
-  return inflowMap.byNameBranch[nbKey] || null;
+function presSumInflow(obj, months) {
+  return obj ? months.reduce((t, m) => t + (obj[m] || 0), 0) : 0;
 }
 
-/* Sum inflow for all staff in a branch */
-function presGetBranchInflow(staffList, branchName, inflowMap) {
-  let amount = 0, count = 0;
-  staffList.forEach(s => {
-    const inf = presGetStaffInflow(s, branchName, inflowMap);
-    if (inf) { amount += inf.amount; count += inf.count; }
-  });
-  return amount > 0 ? { amount, count } : null;
+/* One staff member, YTD (ytdMonths = Apr → last selected month) */
+function presGetStaffInflow(staffObj, branchName, inflowMap, ytdMonths) {
+  if (!inflowMap) return null;
+  const amount = presSumInflow(inflowMap.staff[presNorm(staffObj.name)], ytdMonths);
+  return amount > 0 ? { amount, count: 0 } : null;
+}
+
+/* Branch, YTD — Branch column, fallback to sum of staff */
+function presGetBranchInflow(staffList, branchName, inflowMap, ytdMonths) {
+  if (!inflowMap) return null;
+  let amount = presSumInflow(inflowMap.branch[presNorm(branchName)], ytdMonths);
+  if (!amount) amount = staffList.reduce((t, s) => {
+    const inf = presGetStaffInflow(s, branchName, inflowMap, ytdMonths);
+    return t + (inf ? inf.amount : 0);
+  }, 0);
+  return amount > 0 ? { amount, count: 0 } : null;
 }
 
 /* ── Hook inflow into product grid render ──
@@ -630,7 +622,7 @@ presRenderProductGrid = function() {
         const out  = extra.outstanding[k] || null;
         const due  = (k === "RD" && extra.rdDueAmount) ? { amount: extra.rdDueAmount, count: extra.rdDueCount } : null;
         /* RD Inflow YTD — branch aggregate */
-        const inflow = (k === "RD") ? presGetBranchInflow(agg.staff, presState.branchName, inflowMap) : null;
+        const inflow = (k === "RD") ? presGetBranchInflow(agg.staff, presState.branchName, inflowMap, MONTHS.slice(0, MONTHS.indexOf(d.lastMonth) + 1)) : null;
         return presDualProdCardHTML(k, t.ach, t.tgt, tYtd.ach, tYtd.tgt, out, due, inflow, periodLabel, ytdLabel);
       }).join("")}
       </div>`;
@@ -652,7 +644,7 @@ presRenderStaffCards = function() {
     const periodLabel  = presPeriodLabel(periodMonths);
     const ytdLabel     = presYtdLabel(lastMonth);
 
-    const staffInflow = presGetStaffInflow(s, presState.branchName, inflowMap);
+    const staffInflow = presGetStaffInflow(s, presState.branchName, inflowMap, ytdMonths);
 
     document.getElementById("staffCards").innerHTML = `
       <div class="pres-prod-grid">
